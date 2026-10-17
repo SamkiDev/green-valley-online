@@ -5,6 +5,7 @@ import { ApiError } from '../lib/api';
 import { rand } from '../lib/format';
 import { Badge, DemoTag, EmptyState, ErrorState, LinkButton, Skeleton } from '../components/ui';
 import { WhatsAppButton } from '../components/WhatsAppButton';
+import { Reviews } from '../components/Reviews';
 
 export default function StorePage() {
   const { slug = '' } = useParams();
@@ -34,7 +35,7 @@ export default function StorePage() {
             <p className="mt-1 font-semibold text-on-panel-2">{s.category}</p>
             {s.description && <p className="mt-3 max-w-xl text-on-panel-2">{s.description}</p>}
           </div>
-          {active && <LinkButton to="/shop" size="lg" variant={slug === 'meat-market' ? 'meat' : 'primary'} className="shrink-0">SHOP NOW <ArrowRight className="size-5" aria-hidden /></LinkButton>}
+          {active && <LinkButton to={`/shop?store=${slug}`} size="lg" variant={slug === 'meat-market' ? 'meat' : 'primary'} className="shrink-0">SHOP NOW <ArrowRight className="size-5" aria-hidden /></LinkButton>}
         </div>
       </section>
 
@@ -74,14 +75,16 @@ export default function StorePage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <section aria-labelledby="reviews">
-          <h2 id="reviews" className="mb-3 text-xl font-extrabold">Reviews</h2>
-          <EmptyState icon={Star} title="No reviews yet">Customers with a completed order will be able to review this store.</EmptyState>
-        </section>
+        {active ? <Reviews storeSlug={slug} title="Store reviews" /> : (
+          <section aria-labelledby="reviews">
+            <h2 id="reviews" className="mb-3 text-xl font-extrabold">Store reviews</h2>
+            <EmptyState icon={Star} title="No reviews yet">Reviews open when this store goes online.</EmptyState>
+          </section>
+        )}
         <section aria-labelledby="qa">
           <h2 id="qa" className="mb-3 text-xl font-extrabold">Questions &amp; answers</h2>
           <EmptyState icon={MessageSquareText} title="Ask about a product">
-            {active ? <>Questions are asked on each product page and answered by the store. <Link to="/shop" className="font-semibold text-brand-text underline">Browse products</Link></> : 'Q&A opens when this store goes online.'}
+            {active ? <>Questions are asked on each product page and answered by the store. <Link to={`/shop?store=${slug}`} className="font-semibold text-brand-text underline">Browse products</Link></> : 'Q&A opens when this store goes online.'}
           </EmptyState>
         </section>
       </div>

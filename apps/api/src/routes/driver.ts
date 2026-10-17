@@ -9,7 +9,8 @@ const NEXT: Partial<Record<DeliveryStatus, DeliveryStatus>> = { PENDING: 'ASSIGN
 
 const orderForDriver = {
   select: {
-    id: true, seq: true, status: true, area: true, addressText: true, total: true, createdAt: true, contactName: true, contactPhone: true,
+    id: true, seq: true, status: true, area: true, addressText: true, total: true, createdAt: true, contactName: true, contactPhone: true, ageConfirmedAt: true,
+    store: { select: { name: true, ageRestricted: true, config: true } }, // age-restricted orders need an ID check at the door
     address: { select: { street: true, area: true, city: true, province: true, postalCode: true } },
     items: { select: { nameSnapshot: true, quantity: true, product: { select: { soldByWeight: true } } } },
     customer: { select: { user: { select: { name: true } } } },

@@ -1,6 +1,7 @@
-import { Link, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
+import type { ReorderNotice } from '../lib/reorder';
 import { AlertTriangle, ArrowRight, Info, ShoppingBag, Store, Trash2, Truck } from 'lucide-react';
-import { useCart } from '../lib/cart';
+import { useCart, useForceCollection } from '../lib/cart';
 import { useProducts, useStore } from '../lib/queries';
 import { available, type Product } from '../lib/api';
 import { lineTotal, rand, unitLabel } from '../lib/format';
@@ -13,8 +14,10 @@ const CART_WEIGHTS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5];
 export default function Cart() {
   const cart = useCart();
   const nav = useNavigate();
+  const notice = (useLocation().state as { reorder?: ReorderNotice } | null)?.reorder;
   const products = useProducts({ store: cart.storeSlug });
   const store = useStore(cart.storeSlug);
+  useForceCollection(store.data && store.data.zones.length === 0);
 
   if (cart.lines.length === 0)
     return (
@@ -45,6 +48,12 @@ export default function Cart() {
   return (
     <div className="container-page">
       <PageHeader title="Your cart">{cart.count} {cart.count === 1 ? 'item' : 'items'} from {store.data.name}</PageHeader>
+      {notice && (
+        <div className={`mb-4 rounded-2xl p-4 ${notice.skipped.length ? 'bg-warn-bg text-warn-text' : 'bg-ok-bg text-ok-text'}`} role="status">
+          <p className="font-bold">{notice.added.length ? `Added ${notice.added.length} ${notice.added.length === 1 ? 'item' : 'items'} from your past order.` : 'Nothing from that order could be added.'}</p>
+          {notice.skipped.length > 0 && <ul className="mt-1 list-disc pl-5 text-sm">{notice.skipped.map(x => <li key={x.name}>{x.name}: {x.reason}</li>)}</ul>}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
         <section aria-label="Cart items" className="space-y-3">
           {problems.length > 0 && (
@@ -68,7 +77,7 @@ export default function Cart() {
           <fieldset>
             <legend className="mb-2 font-extrabold">How would you like it?</legend>
             <div className="grid grid-cols-2 gap-2">
-              {([['DELIVERY', 'Delivery', Truck], ['COLLECTION', 'Collect in store', Store]] as const).map(([v, label, Icon]) => (
+              {([['DELIVERY', 'Delivery', Truck], ['COLLECTION', 'Collect in store', Store]] as const).filter(([v]) => v === 'COLLECTION' || zones.length > 0).map(([v, label, Icon]) => (
                 <button key={v} type="button" aria-pressed={cart.fulfilment === v} onClick={() => cart.setFulfilment(v)}
                   className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border p-2 text-sm font-semibold transition ${cart.fulfilment === v ? 'border-brand bg-brand-soft text-brand-text' : 'border-line hover:border-ink-3'}`}>
                   <Icon className="size-5" aria-hidden />{label}

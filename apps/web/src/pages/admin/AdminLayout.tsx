@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router';
-import { BarChart3, Boxes, ClipboardList, LayoutDashboard, MessageSquareText, Package, Store, Truck, Users, Warehouse } from 'lucide-react';
+import { BarChart3, Boxes, ClipboardList, LayoutDashboard, MessageSquareText, Package, Star, Store, Truck, Users, Warehouse } from 'lucide-react';
 import { useMe } from '../../lib/auth';
 
 const SECTIONS = [
@@ -8,6 +8,7 @@ const SECTIONS = [
   { to: '/admin/products', label: 'Products', icon: Package },
   { to: '/admin/inventory', label: 'Inventory', icon: Boxes },
   { to: '/admin/questions', label: 'Q&A', icon: MessageSquareText },
+  { to: '/admin/reviews', label: 'Reviews', icon: Star },
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/admin/customers', label: 'Customers', icon: Users, adminOnly: true },
   { to: '/admin/drivers', label: 'Drivers', icon: Truck, adminOnly: true },

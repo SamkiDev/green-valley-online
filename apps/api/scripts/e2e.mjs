@@ -31,7 +31,7 @@ r = await anon('GET', '/products/' + P('Beef Short Ribs').id);
 ok(r.s === 200 && r.j.soldByWeight && Number(r.j.price) === 109.99, 'GET product detail (Beef Short Ribs R109.99/kg)');
 
 r = await anon('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'COLLECTION', items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
-ok(r.s === 401, 'orders require login (401)');
+ok(r.s === 400 && r.j.details?.contact, 'guest order without contact details rejected (400)');
 
 const email = `e2e-${Date.now()}@demo.local`;
 r = await cust('POST', '/auth/register', { email, password: 'test-password-1', name: 'E2E Demo Customer', phone: '0110000000' });
@@ -163,6 +163,8 @@ const meatStore = (await anon('GET', '/stores/meat-market')).j;
 r = await admin('POST', '/admin/products', { storeId: meatStore.id, name: 'E2E Russians', description: 'Test product', price: 59.99, categoryId: cats[0].id, soldByWeight: false, quantity: 12 });
 const newId = r.j?.id;
 ok(r.s === 201, 'admin creates a product');
+r = await admin('PATCH', `/admin/products/${newId}`, { quantity: 30 });
+ok(r.s === 200 && Number((await anon('GET', `/products/${newId}`)).j.inventory.quantity) === 30, 'stock-only update (inventory screen) works');
 ok((await anon('GET', '/products?q=E2E%20Russians')).j.length === 1, 'new product appears in the shop');
 await admin('PATCH', `/admin/products/${newId}`, { active: false });
 ok((await anon('GET', '/products?q=E2E%20Russians')).j.length === 0, 'unavailable product hidden from the shop');
@@ -177,6 +179,80 @@ r = await admin('PATCH', `/admin/stores/${meatStore.id}`, { config: { whatsapp: 
 ok(r.s === 400, 'invalid WhatsApp number rejected');
 const adminMe = (await admin('GET', '/auth/me')).j;
 ok((await admin('PATCH', `/admin/users/${adminMe.id}/active`, { active: false })).s === 400, 'admin cannot disable own account');
+
+// ---- Stage 5: guest checkout ----
+const guest = client();
+r = await guest('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, contact: { ...contact, email: 'guest@demo.local' }, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+const gOrder = r.j; const gHdr = { 'X-Order-Token': gOrder?.guestToken };
+ok(r.s === 201 && !!gOrder.guestToken && !gOrder.customerId, 'guest places an order and gets an access token', gOrder?.orderNumber);
+ok((await guest('GET', `/orders/${gOrder.id}`)).s === 404, 'guest order hidden without its token');
+ok((await cust('GET', `/orders/${gOrder.id}`)).s === 404, "other customers can't see a guest order");
+const gfetch = (method, path, body) => fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json', ...gHdr }, body: body && JSON.stringify(body) }).then(async x => ({ s: x.status, j: await x.json() }));
+ok((await gfetch('GET', `/orders/${gOrder.id}`)).j.guest === true, 'guest order readable with its token');
+r = await gfetch('POST', `/payments/${gOrder.id}/pay`, { method: 'CARD' });
+ok(r.s === 200 && r.j.status === 'PAID', 'guest pays with the token');
+ok((await gfetch('GET', `/orders/${gOrder.id}/tracking`)).j.current === 'PREPARING', 'guest tracking works');
+r = await anon('POST', '/orders/lookup', { orderNumber: '#' + gOrder.orderNumber, email: 'GUEST@demo.local' });
+ok(r.s === 200 && r.j.token === gOrder.guestToken, 'lookup by order number + email returns the same token');
+ok((await anon('POST', '/orders/lookup', { orderNumber: gOrder.orderNumber, email: 'wrong@demo.local' })).s === 404, 'lookup with the wrong email fails');
+ok((await admin('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'COLLECTION', contact, items: [{ productId: P('Braai Pack').id, quantity: 1 }] })).s === 403, 'staff accounts cannot place orders');
+
+// ---- Stage 5: account ----
+r = await cust('PATCH', '/account/profile', { name: 'E2E Renamed', phone: '083 111 2222' });
+ok(r.s === 200 && r.j.name === 'E2E Renamed', 'profile update');
+ok((await cust('PATCH', '/account/profile', { name: 'X', phone: '123' })).s === 400, 'profile rejects a bad phone number');
+ok((await cust('POST', '/account/password', { current: 'wrong-password', next: 'new-password-9' })).s === 400, 'password change needs the current password');
+ok((await cust('POST', '/account/password', { current: 'test-password-1', next: 'new-password-9' })).s === 200, 'password changed');
+ok((await client()('POST', '/auth/login', { email, password: 'new-password-9' })).s === 200, 'new password works for sign in');
+r = await cust('POST', '/account/addresses', { ...address, label: 'Home' });
+const savedAddr = r.j;
+ok(r.s === 201 && (await cust('GET', '/account/addresses')).j.length === 1, 'save an address');
+await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address: { ...address, street: '99 Other Street' }, saveAddress: true, contact, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+ok((await cust('GET', '/account/addresses')).j.length === 2, 'checkout can save a new address');
+await cust('DELETE', `/account/addresses/${savedAddr.id}`);
+ok((await cust('GET', '/account/addresses')).j.length === 1, 'remove a saved address');
+await cust('PUT', `/account/favourites/${P('Lamb Chops').id}`);
+await cust('POST', '/account/favourites/merge', { productIds: [P('Lamb Chops').id, P('Pork Ribs').id, 'not-a-real-id'] });
+r = await cust('GET', '/account/favourites');
+ok(r.j.length === 2 && r.j.some(p => p.name === 'Pork Ribs'), 'favourites saved and merged', r.j.map(p => p.name).join(', '));
+await cust('DELETE', `/account/favourites/${P('Pork Ribs').id}`);
+ok((await cust('GET', '/account/favourites')).j.length === 1, 'remove a favourite');
+
+// ---- Stage 5: order again ----
+r = await cust('POST', `/orders/${order.id}/reorder`);
+ok(r.s === 200 && r.j.storeSlug === 'meat-market' && r.j.items.length === 3, 'order again lists the past items', r.j.items?.map(i => `${i.name}:${i.available ? 'ok' : i.reason}`).join(', '));
+await admin('PATCH', `/admin/products/${P('Chicken Wings').id}`, { active: false });
+r = await cust('POST', `/orders/${order.id}/reorder`);
+ok(r.j.items.find(i => i.name === 'Chicken Wings')?.reason === 'no longer available', 'order again flags unavailable items');
+await admin('PATCH', `/admin/products/${P('Chicken Wings').id}`, { active: true });
+
+// ---- Stage 5: reviews ----
+r = await cust('GET', `/reviews?productId=${P('Family Braai Pack').id}`);
+ok(r.s === 200 && r.j.canReview === true, 'customer with a delivered order can review the product');
+r = await cust('POST', '/reviews', { productId: P('Family Braai Pack').id, rating: 5, comment: 'Fed the whole family. Great value.' });
+ok(r.s === 201, 'product review posted');
+ok((await cust('POST', '/reviews', { productId: P('Family Braai Pack').id, rating: 4, comment: 'Again' })).s === 403, 'only one review per product');
+r = await anon('GET', `/reviews?productId=${P('Family Braai Pack').id}`);
+ok(r.j.count === 1 && r.j.average === 5 && r.j.reviews[0].name === 'E2E', 'reviews public with first name only', JSON.stringify(r.j.reviews[0]));
+ok((await cust('POST', '/reviews', { storeSlug: 'meat-market', rating: 4, comment: 'Friendly service and quick delivery.' })).s === 201, 'store review posted');
+const newbie = client();
+await newbie('POST', '/auth/register', { email: `newbie-${Date.now()}@demo.local`, password: 'test-password-1', name: 'New Person' });
+r = await newbie('POST', '/reviews', { productId: P('Family Braai Pack').id, rating: 1, comment: 'Never bought it' });
+ok(r.s === 403, 'customers without a completed order cannot review', r.j?.error);
+ok((await cust('POST', '/reviews', { productId: P('Family Braai Pack').id, rating: 9, comment: 'x' })).s === 400, 'invalid rating rejected');
+
+// ---- Stage 5: age-restricted store ----
+const liquor = (await admin('GET', '/admin/stores')).j.find(s => s.slug === 'bottle-liquors');
+await admin('PATCH', `/admin/stores/${liquor.id}`, { status: 'ACTIVE' });
+r = await admin('POST', '/admin/products', { storeId: liquor.id, name: 'E2E Lager 6-pack', description: 'Test', price: 99.99, categoryId: cats[0].id, soldByWeight: false, quantity: 10 });
+const beer = r.j;
+const liquorOrder = (extra) => cust('POST', '/orders', { storeSlug: 'bottle-liquors', fulfilment: 'COLLECTION', contact, items: [{ productId: beer.id, quantity: 1 }], ...extra });
+r = await liquorOrder({});
+ok(r.s === 400 && /18 or older/.test(r.j.error), 'age-restricted order needs age confirmation', r.j?.error);
+r = await liquorOrder({ ageConfirmed: true });
+ok(r.s === 201 && r.j.ageConfirmedAt, 'age-restricted order accepted after confirmation');
+await admin('DELETE', `/admin/products/${beer.id}`);
+await admin('PATCH', `/admin/stores/${liquor.id}`, { status: 'COMING_SOON' });
 
 console.log(`\n${pass} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

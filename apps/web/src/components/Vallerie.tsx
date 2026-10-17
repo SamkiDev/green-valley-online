@@ -5,7 +5,7 @@ import { Link, useLocation } from 'react-router';
 import { useMutation } from '@tanstack/react-query';
 import { ArrowUp, Check, Plus, Sparkles, X } from 'lucide-react';
 import { api, stockState, type ChatMsg, type ChatProduct, type ChatResponse } from '../lib/api';
-import { useCart } from '../lib/cart';
+import { useAddToCart, useCart } from '../lib/cart';
 import { rand, unitLabel } from '../lib/format';
 
 type Entry = { role: 'user' | 'assistant'; content: string; products?: ChatProduct[]; failed?: boolean };
@@ -136,7 +136,7 @@ function RichText({ text }: { text: string }) {
 }
 
 function ProductStrip({ products }: { products: ChatProduct[] }) {
-  const cart = useCart();
+  const addToCart = useAddToCart();
   const [added, setAdded] = useState<string | null>(null);
   return (
     <ul className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" aria-label="Suggested products">
@@ -147,7 +147,7 @@ function ProductStrip({ products }: { products: ChatProduct[] }) {
             <Link to={`/product/${p.id}`} className="line-clamp-2 min-h-10 text-sm font-bold leading-tight hover:underline">{p.name}</Link>
             <p className="mt-1 text-sm"><span className="font-extrabold">{rand(p.price)}</span><span className="text-ink-3">{unitLabel(p.soldByWeight)}</span></p>
             {out ? <p className="mt-2 text-xs font-bold text-danger-text">Out of stock</p> : (
-              <button type="button" onClick={() => { cart.add(p.id, 1); setAdded(p.id); setTimeout(() => setAdded(null), 1500); }}
+              <button type="button" onClick={() => { if (!addToCart(p.id, 1)) return; setAdded(p.id); setTimeout(() => setAdded(null), 1500); }}
                 className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-1 rounded-lg bg-brand text-sm font-bold text-on-brand">
                 {added === p.id ? <><Check className="size-4" aria-hidden /> Added</> : <><Plus className="size-4" aria-hidden /> Add {p.soldByWeight ? '1 kg' : ''}</>}
               </button>

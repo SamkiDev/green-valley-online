@@ -2,7 +2,7 @@
 // Each action sends the status the driver saw, so a double tap or a stale screen can't skip a step.
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, MapPin, PackageCheck, Phone, RotateCcw, Truck } from 'lucide-react';
+import { CheckCircle2, MapPin, PackageCheck, Phone, RotateCcw, ShieldAlert, Truck } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { dateTime, firstName, rand, time } from '../../lib/format';
@@ -13,6 +13,7 @@ type Delivery = {
   id: string; status: DStatus; mine: boolean; orderNumber: string; assignedAt: string | null; deliveredAt: string | null;
   order: {
     id: string; status: string; area: string | null; total: string; createdAt: string; contactName: string | null; contactPhone: string | null;
+    store: { name: string; ageRestricted: boolean; config: { ageVerification?: { minimumAge: number } } };
     address: { street: string; area: string; city: string; province: string; postalCode: string } | null;
     items: { nameSnapshot: string; quantity: string; product: { soldByWeight: boolean } }[];
   };
@@ -99,7 +100,10 @@ function DeliveryCard({ d }: { d: Delivery }) {
     <article className={`card overflow-hidden ${d.status === 'OUT_FOR_DELIVERY' || d.status === 'ARRIVED' ? 'ring-2 ring-brand' : ''}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
         <p className="text-lg font-extrabold">#{d.orderNumber}</p>
-        <Badge tone={d.status === 'ARRIVED' || d.status === 'OUT_FOR_DELIVERY' ? 'brand' : d.status === 'PENDING' ? 'warn' : 'neutral'}>{STATUS_LABEL[d.status]}</Badge>
+        <div className="flex flex-wrap gap-1.5">
+          {d.order.store.ageRestricted && <Badge tone="warnSolid"><ShieldAlert className="size-3.5" aria-hidden /> CHECK ID: {d.order.store.config.ageVerification?.minimumAge ?? 18}+</Badge>}
+          <Badge tone={d.status === 'ARRIVED' || d.status === 'OUT_FOR_DELIVERY' ? 'brand' : d.status === 'PENDING' ? 'warn' : 'neutral'}>{STATUS_LABEL[d.status]}</Badge>
+        </div>
       </div>
       <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
         <div>

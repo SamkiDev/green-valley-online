@@ -2,18 +2,18 @@ import { Link } from 'react-router';
 import { Check, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { stockState, type Product } from '../lib/api';
-import { useCart } from '../lib/cart';
+import { useAddToCart } from '../lib/cart';
 import { rand, unitLabel } from '../lib/format';
 import { ProductImage } from './ProductImage';
 import { StockBadge } from './ui';
 
 export function ProductCard({ p }: { p: Product }) {
-  const cart = useCart();
+  const addToCart = useAddToCart();
   const [added, setAdded] = useState(false);
   const state = stockState(p);
   const out = state === 'OUT_OF_STOCK';
   // Quick add uses the smallest sensible amount (1 kg or 1 item); the product page offers the full weight picker.
-  const quick = () => { cart.add(p.id, 1); setAdded(true); setTimeout(() => setAdded(false), 1400); };
+  const quick = () => { if (!addToCart(p.id, 1, p.store?.slug)) return; setAdded(true); setTimeout(() => setAdded(false), 1400); };
   return (
     <article className="card group flex flex-col overflow-hidden p-3 transition-shadow hover:shadow-[0_6px_24px_-12px_rgba(0,0,0,0.25)]">
       <Link to={`/product/${p.id}`} className="block rounded-xl" aria-label={p.name}>

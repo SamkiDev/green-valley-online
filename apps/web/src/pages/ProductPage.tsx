@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Heart, Info, MessageSquareText, PackageX, ShoppingBag, Star } from 'lucide-react';
+import { Check, Heart, Info, MessageSquareText, PackageX, ShoppingBag } from 'lucide-react';
 import { ApiError, api, available, stockState, type Product } from '../lib/api';
 import { useProduct, useQA } from '../lib/queries';
-import { useCart } from '../lib/cart';
+import { useAddToCart, useCart } from '../lib/cart';
 import { useMe } from '../lib/auth';
 import { useFavourites } from '../lib/favourites';
 import { lineTotal, rand, unitLabel } from '../lib/format';
 import { ProductImage } from '../components/ProductImage';
+import { Reviews } from '../components/Reviews';
+import { AgeGate } from '../components/AgeGate';
 import { Stepper, WeightPicker } from '../components/QuantityPicker';
 import { Button, EmptyState, ErrorState, LinkButton, Skeleton, StockBadge } from '../components/ui';
 
@@ -23,11 +25,13 @@ export default function ProductPage() {
       return <div className="container-page py-10"><EmptyState icon={PackageX} title="Product not available" action={<LinkButton to="/shop" variant="secondary">Back to shop</LinkButton>}>This product is no longer listed or the link is wrong.</EmptyState></div>;
     return <div className="container-page py-10"><ErrorState message={q.error.message} onRetry={() => q.refetch()} /></div>;
   }
-  return <ProductView p={q.data} />;
+  const p = q.data;
+  return p.store?.ageRestricted ? <AgeGate slug={p.store.slug} storeName={p.store.name} config={p.store.config}><ProductView p={p} /></AgeGate> : <ProductView p={p} />;
 }
 
 function ProductView({ p }: { p: Product }) {
   const cart = useCart();
+  const addTo = useAddToCart();
   const nav = useNavigate();
   const fav = useFavourites();
   const state = stockState(p);
@@ -41,13 +45,13 @@ function ProductView({ p }: { p: Product }) {
   const disabled = out || tooMuch || qty <= 0;
   const estimate = qty > 0 ? rand(lineTotal(p.price, qty)) : '—';
 
-  const addToCart = () => { cart.add(p.id, qty); setAdded(true); setTimeout(() => setAdded(false), 1800); };
-  const buyNow = () => { cart.add(p.id, qty); nav('/cart'); };
+  const addToCart = () => { if (!addTo(p.id, qty, p.store?.slug)) return; setAdded(true); setTimeout(() => setAdded(false), 1800); };
+  const buyNow = () => { if (addTo(p.id, qty, p.store?.slug)) nav('/cart'); };
 
   return (
     <div className="container-page pb-28 pt-4 md:pb-10 md:pt-8">
       <nav className="mb-4 text-sm text-ink-3" aria-label="Breadcrumb">
-        <Link to="/shop" className="hover:underline">Shop</Link> / <Link to={`/shop?category=${p.category.name}`} className="hover:underline">{p.category.name}</Link> / <span className="text-ink-2">{p.name}</span>
+        <Link to={`/shop?store=${p.store?.slug ?? 'meat-market'}`} className="hover:underline">{p.store?.name ?? 'Shop'}</Link> / <Link to={`/shop?store=${p.store?.slug ?? 'meat-market'}&category=${p.category.name}`} className="hover:underline">{p.category.name}</Link> / <span className="text-ink-2">{p.name}</span>
       </nav>
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-10">
         <ProductImage name={p.name} category={p.category.name} imageUrl={p.imageUrl} size="lg" className="md:sticky md:top-24" />
@@ -96,10 +100,7 @@ function ProductView({ p }: { p: Product }) {
           </div>
 
           <ProductQA productId={p.id} />
-          <section className="mt-8" aria-labelledby="reviews">
-            <h2 id="reviews" className="mb-3 text-xl font-extrabold">Reviews</h2>
-            <EmptyState icon={Star} title="No reviews yet">Customers who have received this product will be able to leave a review.</EmptyState>
-          </section>
+          <div className="mt-8"><Reviews productId={p.id} /></div>
         </div>
       </div>
 
