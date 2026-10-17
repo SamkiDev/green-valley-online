@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { Boxes, Package, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
-import { api, ApiError } from '../../lib/api';
+import { Boxes, Camera, ImagePlus, Images, Package, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { api, apiUpload, ApiError } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { useCategories, useStores } from '../../lib/queries';
 import { rand, unitLabel } from '../../lib/format';
@@ -9,6 +9,7 @@ import { ProductImage } from '../../components/ProductImage';
 import { Badge, Button, EmptyState, ErrorState, Skeleton } from '../../components/ui';
 import { AdminHeader } from './AdminLayout';
 import { useAdmin, useAdminMutation, type AdminProduct, type InventoryRow } from './adminApi';
+import { useRef } from 'react';
 
 type Draft = { id?: string; storeId: string; name: string; description: string; price: string; categoryId: string; soldByWeight: boolean; quantity: string; lowThreshold: string; imageUrl: string; active: boolean };
 
@@ -26,6 +27,7 @@ export function Products() {
     <>
       <AdminHeader title="Products" actions={<Button onClick={startNew}><Plus className="size-4" aria-hidden /> Add product</Button>}>Prices are per kg for weighed products. Unavailable products stay here but are hidden from the shop.</AdminHeader>
       {editing && <ProductForm draft={editing} onClose={() => setEditing(null)} />}
+      <BulkPhotos />
       <div className="relative mb-4 max-w-md">
         <label htmlFor="prod-search" className="sr-only">Search products</label>
         <Search className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-ink-3" aria-hidden />
@@ -53,6 +55,7 @@ export function Products() {
                       <Trash2 className="size-3.5" aria-hidden />
                     </Button>
                   </div>
+                  <PhotoControls p={p} />
                 </div>
               </li>
             ))}
@@ -123,7 +126,7 @@ function ProductForm({ draft, onClose }: { draft: Draft; onClose: () => void }) 
         <Field id="pf-price" label={`Price (R${d.soldByWeight ? ' per kg' : ' each'})`} inputMode="decimal" value={d.price} onChange={set('price')} error={show('price')} />
         <Field id="pf-qty" label={`Stock (${d.soldByWeight ? 'kg' : 'items'})`} inputMode="decimal" value={d.quantity} onChange={set('quantity')} error={show('quantity')} />
         <Field id="pf-low" label="Low-stock alert at" inputMode="decimal" value={d.lowThreshold} onChange={set('lowThreshold')} error={show('lowThreshold')} />
-        <Field id="pf-img" label="Image link (optional)" type="url" value={d.imageUrl} onChange={set('imageUrl')} error={show('imageUrl')} hint="Photo upload arrives with image storage (Stage 6)." />
+        <Field id="pf-img" label="Image link (optional)" type="url" value={d.imageUrl} onChange={set('imageUrl')} error={show('imageUrl')} hint="Or upload a photo from the product card after saving." />
         <TextArea id="pf-desc" label="Description" className="sm:col-span-2" maxLength={500} value={d.description} onChange={set('description')} />
         <label className="flex items-center gap-2 text-sm font-semibold sm:col-span-2"><input type="checkbox" className="size-4 accent-[var(--brand)]" checked={d.active} onChange={e => setD(s => ({ ...s, active: e.target.checked }))} /> Available in the shop</label>
       </div>
@@ -167,5 +170,57 @@ function StockRow({ r }: { r: InventoryRow }) {
       </div>
       {save.isError && <p className="w-full text-sm text-danger-text" role="alert">{save.error.message}</p>}
     </li>
+  );
+}
+
+// Per-product photo: take one with the phone camera or pick a file. The API resizes it and strips metadata.
+function PhotoControls({ p }: { p: AdminProduct }) {
+  const camera = useRef<HTMLInputElement>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const upload = useAdminMutation((f: File) => { const fd = new FormData(); fd.append('image', f); return apiUpload(`/admin/products/${p.id}/image`, fd); });
+  const remove = useAdminMutation(() => api(`/admin/products/${p.id}/image`, { method: 'DELETE' }));
+  const pick = (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload.mutate(f); };
+  const err = upload.error ?? remove.error;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <input ref={camera} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden onChange={pick} />
+      <input ref={file} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" tabIndex={-1} aria-hidden onChange={pick} />
+      <Button size="sm" variant="ghost" onClick={() => camera.current?.click()} busy={upload.isPending} aria-label={`Take a photo of ${p.name}`}><Camera className="size-3.5" aria-hidden /> Take photo</Button>
+      <Button size="sm" variant="ghost" onClick={() => file.current?.click()} disabled={upload.isPending} aria-label={`Upload a photo of ${p.name}`}><ImagePlus className="size-3.5" aria-hidden /> Upload</Button>
+      {p.imageUrl && <Button size="sm" variant="ghost" className="text-ink-3" busy={remove.isPending} onClick={() => window.confirm(`Remove the photo of ${p.name}?`) && remove.mutate(undefined)}>Remove photo</Button>}
+      {err && <p className="w-full text-sm text-danger-text" role="alert">{err.message}</p>}
+    </div>
+  );
+}
+
+type BulkResult = { matched: number; results: { file: string; product?: string; ok: boolean; error?: string }[] };
+// Bulk upload: name each file after its product ("Beef Mince.jpg", "beef-mince.png") and they are matched automatically.
+function BulkPhotos() {
+  const input = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const upload = useAdminMutation((files: File[]) => { const fd = new FormData(); files.forEach(f => fd.append('images', f)); return apiUpload<BulkResult>('/admin/products/images/bulk', fd); });
+  return (
+    <section className="card mb-4 p-4" aria-labelledby="bulk-h">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="bulk-h" className="flex items-center gap-2 font-extrabold"><Images className="size-5 text-ink-3" aria-hidden /> Bulk photo upload</h2>
+        <Button size="sm" variant="secondary" onClick={() => setOpen(o => !o)} aria-expanded={open}>{open ? 'Hide' : 'Upload many photos'}</Button>
+      </div>
+      {open && (
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-ink-2">Name each photo after its product, e.g. <span className="font-semibold">Beef Mince.jpg</span> or <span className="font-semibold">beef-short-ribs.png</span>. Up to 50 photos, 8 MB each.</p>
+          <input ref={input} type="file" multiple accept="image/jpeg,image/png,image/webp" className="sr-only" tabIndex={-1} aria-hidden onChange={e => { const fs = [...(e.target.files ?? [])]; e.target.value = ''; if (fs.length) upload.mutate(fs); }} />
+          <Button onClick={() => input.current?.click()} busy={upload.isPending}><ImagePlus className="size-4" aria-hidden /> Choose photos</Button>
+          {upload.isError && <p className="text-sm font-semibold text-danger-text" role="alert">{upload.error.message}</p>}
+          {upload.data && (
+            <div role="status">
+              <p className="font-semibold">{upload.data.matched} of {upload.data.results.length} photos matched to products.</p>
+              <ul className="mt-1 space-y-0.5 text-sm">
+                {upload.data.results.map(r => <li key={r.file} className={r.ok ? 'text-ok-text' : 'text-danger-text'}>{r.ok ? '✓' : '✕'} {r.file}{r.ok ? ` → ${r.product}` : `: ${r.error}`}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { api, type Category, type Product, type QA, type Store, type StoreDetail } from './api';
+import { api, type Category, type PaymentConfig, type Product, type QA, type Store, type StoreDetail } from './api';
 
 export type ProductFilters = { q?: string; category?: string; max?: number; inStock?: boolean; sort?: 'popular' | 'low' | 'high'; store?: string };
 
@@ -20,3 +20,4 @@ export function useProducts(f: ProductFilters = {}) {
   const qs = p.toString();
   return useQuery({ queryKey: ['products', qs], queryFn: ({ signal }) => api<Product[]>(`/products${qs ? '?' + qs : ''}`, { signal }), placeholderData: prev => prev });
 }
+export const usePaymentConfig = () => useQuery({ queryKey: ['payment-config'], queryFn: () => api<PaymentConfig>('/payments/config'), staleTime: 10 * 60_000 });

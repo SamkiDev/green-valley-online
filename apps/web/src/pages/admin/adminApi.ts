@@ -30,7 +30,7 @@ export const useAdmin = <T,>(path: string, opts: { refetchInterval?: number; ena
   useQuery({ queryKey: ['admin', path], queryFn: () => api<T>('/admin' + path), ...opts });
 
 // Mutations refresh every admin query afterwards, so all panels stay consistent.
-export function useAdminMutation<V>(fn: (v: V) => Promise<unknown>) {
+export function useAdminMutation<V, R = unknown>(fn: (v: V) => Promise<R>) {
   const qc = useQueryClient();
   return useMutation({ mutationFn: fn, onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['products'] }); qc.invalidateQueries({ queryKey: ['stores'] }); } });
 }

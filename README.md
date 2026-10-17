@@ -70,6 +70,25 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 - **Guests** can check out without an account. Each guest order gets an access token (an HMAC of the order id, nothing stored) that this device keeps; anyone can also find an order on *Track Order* with its number and the checkout email (rate limited).
 - **Age-restricted stores** (Bottle Liquors): the shop and product pages ask for a date of birth (self-declared, not saved), checkout needs an explicit confirmation that the API enforces and records (`Order.ageConfirmedAt`), and drivers see a CHECK ID badge. The minimum age and any compliance text come from the store settings. Bottle Liquors has no delivery zones yet, so it is collection-only until an admin adds zones.
 
+## Product photos
+
+Admins and store staff add photos from **Admin > Products**: *Take photo* opens the phone camera, *Upload* picks a file, and *Bulk photo upload* matches files to products by name (`Beef Mince.jpg`, `beef-short-ribs.png`). Every photo is re-encoded to WebP (at most 1200 px) with its metadata removed, including the GPS location phones embed. Files are stored in `apps/api/uploads` (git-ignored) and served at `/uploads`; replace `LocalStorage` in `apps/api/src/storage.ts` with S3 or Cloudinary later.
+
+## Payments (Paystack)
+
+`PAYMENT_PROVIDER=demo` (the default) simulates payment. To use Paystack test mode, put your own test key in `apps/api/.env` and restart the API:
+
+```
+PAYMENT_PROVIDER="paystack"
+PAYSTACK_SECRET_KEY="sk_test_..."
+```
+
+The customer pays on Paystack's page and returns to `/checkout/return`; the API asks Paystack directly and checks the reference, the amount in cents and that the currency is ZAR before confirming the order. In production, also point Paystack's webhook at `/api/payments/webhooks/paystack` (signature-checked). Live keys (`sk_live_`) are refused unless `ALLOW_LIVE_PAYMENTS=true`. `npm run test:paystack` (in `apps/api`) runs the whole flow against a mock Paystack, no account needed.
+
+## GPS tracking
+
+While a delivery is out for delivery or arrived, the driver portal shares the phone's location (one stored point every 10 to 15 seconds; the driver can pause it). The customer's tracking page shows a live OpenStreetMap map with the driver's pin; the position is hidden before the driver leaves and after delivery. History is kept in `TrackingPoint` for 30 days. Browsers only allow location on https (or localhost), so drivers' phones need the site served over https.
+
 ## Portals
 
 - **Driver** `/driver`: sign in as a driver. Today's deliveries with ACCEPT DELIVERY, START DELIVERY, ARRIVED, DELIVERED (DELIVERED asks for a second tap). Each action sends the status the driver saw, so a double tap can't skip a step; the customer's tracking page updates within seconds.
@@ -82,8 +101,9 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 | Auth | `POST /api/auth/register` `login` `logout`, `GET /api/auth/me` (httpOnly JWT cookie; role always read from DB) |
 | Catalogue | `GET /api/stores`, `/stores/:slug`, `/stores/:slug/zones`, `/categories`, `/products?q=&category=&max=&inStock=1&sort=`, `/products/:id`, `/products/:id/qa` |
 | Orders | `POST /api/orders` (server recomputes all prices, decrements stock atomically), `GET /orders`, `/orders/:id`, `/orders/:id/tracking`, `POST /orders/:id/reorder` |
-| Payments | `POST /api/payments/:orderId/pay` `{ method: CARD \| EFT }`, DEMO provider behind `PaymentProvider` |
-| Deliveries | `GET /api/deliveries/mine`, `POST /deliveries/:id/advance` (accept → start → arrived → delivered) |
+| Payments | `GET /api/payments/config`, `POST /api/payments/:orderId/pay` `{ method: CARD \| EFT }`, `POST /payments/:orderId/verify`, `POST /payments/webhooks/paystack` |
+| Deliveries | `GET /api/deliveries/mine`, `POST /deliveries/:id/advance` (accept → start → arrived → delivered), `POST /deliveries/:id/location` |
+| Photos | `POST /api/admin/products/:id/image` (field `image`), `DELETE /admin/products/:id/image`, `POST /admin/products/images/bulk` (field `images`) |
 | Admin | `/api/admin/stats`, `orders`, `orders/:id/status`, `products`, `inventory`, `wholesale`, `questions/:id/answer`, `zones/:id`, `drivers`, `users/:id/active` |
 | Other | `POST /api/wholesale`, `POST /api/products/:id/questions`, `POST /api/ai/chat` |
 
@@ -94,4 +114,4 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 3. ✅ Checkout (details → delivery or collection → address → review), DEMO payment, confirmation, live tracking (polls every 8 s), Vallerie widget
 4. ✅ Driver portal (`/driver`) and admin dashboard (`/admin`): orders, driver assignment, products, inventory, Q&A, analytics; admin-only customers, drivers, stores & settings, bulk quotes
 5. ✅ Account (profile, password, saved addresses, favourites, ORDER AGAIN), store and product reviews (completed orders only), guest checkout with track-by-number-and-email, multi-store cart, liquor age verification
-6. Image storage, real payment provider, GPS tracking
+6. ✅ Product photos (camera, file and bulk upload; local storage behind an interface), Paystack behind `PaymentProvider` (tested against a mock), GPS driver sharing with a live OpenStreetMap map

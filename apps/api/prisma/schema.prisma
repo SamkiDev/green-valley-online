@@ -241,7 +241,7 @@ model Payment { // never store card data
   amount Decimal @db.Decimal(10, 2)
   createdAt DateTime @default(now())
 }
-model Delivery { // add lat/lng or a TrackingPoint model here for real GPS later
+model Delivery {
   id String @id @default(cuid())
   orderId String @unique
   order Order @relation(fields: [orderId], references: [id])
@@ -253,7 +253,24 @@ model Delivery { // add lat/lng or a TrackingPoint model here for real GPS later
   departedAt DateTime?
   arrivedAt DateTime?
   deliveredAt DateTime?
+  // Latest driver position (shown to the customer only while out for delivery)
+  lastLat Float?
+  lastLng Float?
+  lastAccuracy Float?
+  lastLocationAt DateTime?
   updates DeliveryStatusUpdate[]
+  points TrackingPoint[]
+}
+model TrackingPoint { // GPS history while a delivery is on the road; purged after 30 days
+  id String @id @default(cuid())
+  deliveryId String
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  lat Float
+  lng Float
+  accuracy Float?
+  at DateTime @default(now())
+  @@index([deliveryId, at])
+  @@index([at])
 }
 model DeliveryStatusUpdate {
   id String @id @default(cuid())
