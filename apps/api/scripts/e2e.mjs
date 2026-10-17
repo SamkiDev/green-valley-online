@@ -112,5 +112,71 @@ ok(r.s === 200 && r.j.length >= 1, 'admin can read wholesale requests');
 r = await cust('POST', '/ai/chat', { message: 'I am having a braai for 8 people. What would you recommend?', history: [] });
 ok((r.s === 200 && r.j.reply) || (r.s === 503 && r.j.reply === 'Vallerie is temporarily unavailable. You can continue shopping normally.'), `AI chat route (${r.s})`, (r.j?.reply || '').slice(0, 400));
 
+// ---- Stage 4: admin dashboard and driver rules ----
+const placeAndPay = async (fulfilment, items) => {
+  const o = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment, ...(fulfilment === 'DELIVERY' ? { zoneId: zone1.id, address } : {}), contact, items });
+  await cust('POST', `/payments/${o.j.id}/pay`, { method: 'EFT' }); return o.j;
+};
+const setStatus = (id, s) => admin('PATCH', `/admin/orders/${id}/status`, { status: s });
+
+r = await admin('GET', '/admin/stats');
+ok(r.s === 200 && ['todaysSales', 'todaysOrders', 'pending', 'preparing', 'outForDelivery', 'completedToday'].every(k => k in r.j), 'stats has all six dashboard cards', JSON.stringify(r.j));
+
+const col = await placeAndPay('COLLECTION', [{ productId: P('Braai Pack').id, quantity: 1 }]);
+ok((await setStatus(col.id, 'PACKED')).s === 200, 'collection order: PREPARING -> PACKED');
+ok((await setStatus(col.id, 'READY_FOR_COLLECTION')).s === 200, 'collection order: PACKED -> READY_FOR_COLLECTION');
+ok((await setStatus(col.id, 'COLLECTED')).s === 200, 'collection order: -> COLLECTED');
+r = await setStatus(col.id, 'PREPARING');
+ok(r.s === 409, 'invalid transition rejected (COLLECTED -> PREPARING)', r.j?.error);
+
+const wingsBefore = Number((await anon('GET', '/products/' + P('Chicken Wings').id)).j.inventory.quantity);
+const can = await placeAndPay('DELIVERY', [{ productId: P('Chicken Wings').id, quantity: 2 }]);
+r = await setStatus(can.id, 'CANCELLED');
+const wingsAfter = Number((await anon('GET', '/products/' + P('Chicken Wings').id)).j.inventory.quantity);
+const canDetail = (await cust('GET', `/orders/${can.id}`)).j;
+ok(r.s === 200 && wingsAfter === wingsBefore && canDetail.payment.status === 'REFUNDED', 'cancel restores stock and marks demo payment refunded', `stock ${wingsBefore} -> ${wingsAfter}, payment ${canDetail.payment.status}`);
+r = await drv('GET', '/deliveries/mine');
+ok(!r.j.some(d => d.orderId === can.id), 'cancelled delivery no longer offered to drivers');
+
+const asg = await placeAndPay('DELIVERY', [{ productId: P('Pork Chops').id, quantity: 1 }]);
+const drivers = (await admin('GET', '/admin/drivers')).j;
+r = await admin('PATCH', `/admin/orders/${asg.id}/driver`, { driverId: drivers[0].id });
+ok(r.s === 200, 'admin assigns a driver', drivers[0].user.name);
+const myDel = (await drv('GET', '/deliveries/mine')).j.find(d => d.orderId === asg.id);
+ok(myDel?.mine && myDel.status === 'ASSIGNED', "assigned delivery shows as the driver's own");
+r = await drv('POST', `/deliveries/${myDel.id}/advance`, { from: 'PENDING' });
+ok(r.s === 409, 'stale action rejected (double tap protection)', r.j?.error);
+r = await drv('POST', `/deliveries/${myDel.id}/advance`, { from: 'ASSIGNED' });
+const asgTrack = (await cust('GET', `/orders/${asg.id}/tracking`)).j;
+ok(r.s === 200 && r.j.status === 'OUT_FOR_DELIVERY' && asgTrack.steps.find(s => s.key === 'PACKED').at, 'driver starts delivery; packed step filled in', asgTrack.current);
+r = await admin('PATCH', `/admin/orders/${asg.id}/driver`, { driverId: null });
+ok(r.s === 409, 'cannot reassign once the driver has left');
+
+const staff = client();
+await staff('POST', '/auth/login', { email: 'staff@demo.local', password: 'demo-password-1' });
+ok((await staff('GET', '/admin/orders')).s === 200, 'store staff can see orders');
+ok((await staff('GET', '/admin/customers')).s === 403, 'store staff cannot see customers (403)');
+ok((await drv('GET', '/admin/orders')).s === 403, 'driver cannot use admin routes (403)');
+
+const cats = (await anon('GET', '/categories')).j;
+const meatStore = (await anon('GET', '/stores/meat-market')).j;
+r = await admin('POST', '/admin/products', { storeId: meatStore.id, name: 'E2E Russians', description: 'Test product', price: 59.99, categoryId: cats[0].id, soldByWeight: false, quantity: 12 });
+const newId = r.j?.id;
+ok(r.s === 201, 'admin creates a product');
+ok((await anon('GET', '/products?q=E2E%20Russians')).j.length === 1, 'new product appears in the shop');
+await admin('PATCH', `/admin/products/${newId}`, { active: false });
+ok((await anon('GET', '/products?q=E2E%20Russians')).j.length === 0, 'unavailable product hidden from the shop');
+r = await admin('DELETE', `/admin/products/${newId}`);
+ok(r.s === 200 && !(await admin('GET', '/admin/products')).j.some(p => p.id === newId), 'deleted product hidden from admin list (soft delete)');
+r = await admin('POST', '/admin/products', { storeId: meatStore.id, name: '', price: -1, categoryId: '', soldByWeight: false });
+ok(r.s === 400 && r.j.details, 'invalid product rejected with field errors', Object.keys(r.j?.details || {}).join(','));
+
+r = await admin('GET', '/admin/analytics');
+ok(r.s === 200 && r.j.averageOrderValue > 0 && r.j.topProducts.length > 0, 'analytics: AOV and top products', `AOV R${r.j?.averageOrderValue}, top ${r.j?.topProducts?.[0]?.name}`);
+r = await admin('PATCH', `/admin/stores/${meatStore.id}`, { config: { whatsapp: '12' } });
+ok(r.s === 400, 'invalid WhatsApp number rejected');
+const adminMe = (await admin('GET', '/auth/me')).j;
+ok((await admin('PATCH', `/admin/users/${adminMe.id}/active`, { active: false })).s === 400, 'admin cannot disable own account');
+
 console.log(`\n${pass} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

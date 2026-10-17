@@ -150,7 +150,10 @@ function Footer() {
         </nav>
       </div>
       <div className="border-t border-line">
-        <p className="container-page py-4 text-sm text-ink-3">Demo build: prices are demo prices and payments are simulated. No real money is processed.</p>
+        <div className="container-page flex flex-wrap items-center justify-between gap-2 py-4 text-sm text-ink-3">
+          <p>Demo build: prices are demo prices and payments are simulated. No real money is processed.</p>
+          <p>Staff: <Link className="font-semibold text-ink-2 hover:text-ink hover:underline" to="/driver">Driver portal</Link> · <Link className="font-semibold text-ink-2 hover:text-ink hover:underline" to="/admin">Admin</Link></p>
+        </div>
       </div>
     </footer>
   );

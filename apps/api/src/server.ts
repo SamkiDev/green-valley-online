@@ -2,10 +2,12 @@ import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet'; import cookieParser from 'cookie-parser'; import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs'; import jwt from 'jsonwebtoken'; import { z } from 'zod';
-import { PrismaClient, Role, DeliveryStatus, OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, Prisma } from '@prisma/client';
+import { db, fail, h, me, need, num, orderNo, saPhone, setOrderStatus, type U } from './core';
+import { driverRoutes } from './routes/driver';
+import { adminRoutes } from './routes/admin';
 import { provider } from './payments'; import { askVallerie, mentionedProducts } from './ai';
 
-const db = new PrismaClient();
 const SECRET = process.env.JWT_SECRET; if (!SECRET || SECRET.length < 24) throw new Error('Set a long JWT_SECRET in .env');
 const app = express();
 app.set('trust proxy', 'loopback'); // the Vite dev proxy forwards from localhost; needed for per-client rate limits
@@ -15,16 +17,6 @@ app.use((req, res, next) => { // minimal CORS for the Vite frontend, with creden
   req.method === 'OPTIONS' ? res.sendStatus(204) : next();
 });
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 200 }));
-
-type U = { id: string; role: Role; name: string; email: string; phone: string | null; storeId?: string; customerId?: string; driverId?: string };
-const h = (fn: (req: Request, res: Response) => Promise<any>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
-const me = (res: Response) => res.locals.user as U;
-const num = (d: Prisma.Decimal | number) => Number(d);
-const orderNo = (seq: number) => 'GV' + (10283 + seq);
-const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
-type Tx = Prisma.TransactionClient;
-const setOrderStatus = (tx: Tx, orderId: string, status: OrderStatus, actorUserId?: string) =>
-  tx.order.update({ where: { id: orderId }, data: { status, events: { create: { status, actorUserId } } } });
 
 // ---- auth: role is ALWAYS loaded from the DB, never trusted from the client or token claims ----
 async function load(req: Request, res: Response, next: NextFunction) {
@@ -37,10 +29,6 @@ async function load(req: Request, res: Response, next: NextFunction) {
   next();
 }
 app.use(load);
-const need = (...roles: Role[]) => (_: Request, res: Response, next: NextFunction) => {
-  const u = res.locals.user as U | undefined; if (!u) return res.status(401).json({ error: 'Login required' });
-  if (!roles.includes(u.role)) return res.status(403).json({ error: 'Forbidden' }); next();
-};
 const setSession = (res: Response, id: string) => res.cookie('gvo', jwt.sign({ sub: id }, SECRET!, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 864e5 });
 const authLimit = rateLimit({ windowMs: 15 * 60_000, limit: 30 });
 
@@ -127,8 +115,6 @@ function tracking(o: TrackOrder) {
 }
 
 const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
-// South African numbers: 0XX XXX XXXX or +27 XX XXX XXXX (spaces and dashes allowed); stored as entered, trimmed.
-const saPhone = z.string().trim().refine(v => /^(\+27|0)\d{9}$/.test(v.replace(/[\s-]/g, '')), 'Enter a valid South African phone number');
 
 // ---- orders: the server recomputes every price; client totals are ignored ----
 const O = express.Router(); O.use(need('CUSTOMER'));
@@ -198,77 +184,8 @@ app.post('/api/payments/:orderId/pay', need('CUSTOMER'), h(async (req, res) => {
   res.json({ paymentId: out.id, providerRef: out.providerRef, orderId: o.id, orderNumber: orderNo(o.seq), status: out.status, demo: provider.name === 'demo' });
 }));
 
-// ---- deliveries: drivers only touch their own (or claim an unassigned one); transitions are enforced ----
-const NEXT: Partial<Record<DeliveryStatus, DeliveryStatus>> = { PENDING: 'ASSIGNED', ASSIGNED: 'OUT_FOR_DELIVERY', READY_FOR_PICKUP: 'ASSIGNED', OUT_FOR_DELIVERY: 'ARRIVED', ARRIVED: 'DELIVERED' };
-const D = express.Router(); D.use(need('DRIVER'));
-D.get('/mine', h(async (_, res) => {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const list = await db.delivery.findMany({ where: { OR: [
-      { driverId: me(res).driverId, status: { notIn: ['DELIVERED', 'CANCELLED'] } },
-      { driverId: me(res).driverId, status: 'DELIVERED', deliveredAt: { gte: today } },
-      { driverId: null, status: { in: ['PENDING', 'READY_FOR_PICKUP'] } }] },
-    include: { order: { select: { seq: true, area: true, addressText: true, total: true, createdAt: true, customer: { select: { user: { select: { name: true } } } } } } }, orderBy: { order: { createdAt: 'asc' } } });
-  res.json(list.map(d => ({ ...d, orderNumber: orderNo(d.order.seq), mine: d.driverId === me(res).driverId })));
-}));
-D.post('/:id/advance', h(async (req, res) => {
-  const u = me(res); const now = new Date();
-  const nd = await db.$transaction(async tx => {
-    const d = await tx.delivery.findUnique({ where: { id: req.params.id }, include: { order: { select: { status: true } } } }); if (!d) throw fail(404, 'Not found');
-    if (d.driverId && d.driverId !== u.driverId) throw fail(403, 'Not your delivery');
-    const to = NEXT[d.status]; if (!to) throw fail(409, 'No further transition');
-    const stamp = to === 'ASSIGNED' ? { assignedAt: now, pickedUpAt: now } : to === 'OUT_FOR_DELIVERY' ? { departedAt: now } : to === 'ARRIVED' ? { arrivedAt: now } : { deliveredAt: now };
-    // Conditional update: only succeeds if nobody else claimed or advanced it since we read it.
-    const r = await tx.delivery.updateMany({ where: { id: d.id, status: d.status, driverId: d.driverId }, data: { status: to, driverId: u.driverId, ...stamp } });
-    if (!r.count) throw fail(409, 'This delivery was just updated by someone else. Refresh and try again.');
-    await tx.deliveryStatusUpdate.create({ data: { deliveryId: d.id, status: to, actorUserId: u.id } });
-    if (to === 'ASSIGNED' && (d.order.status === 'PAID' || d.order.status === 'PREPARING')) await setOrderStatus(tx, d.orderId, 'PACKED', u.id);
-    if (to === 'OUT_FOR_DELIVERY' || to === 'DELIVERED') await setOrderStatus(tx, d.orderId, to, u.id);
-    return tx.delivery.findUniqueOrThrow({ where: { id: d.id } });
-  });
-  res.json(nd);
-}));
-app.use('/api/deliveries', D);
-
-// ---- admin / store staff (staff are scoped to their own store) ----
-const AD = express.Router(); AD.use(need('ADMIN', 'STORE_STAFF'));
-const scope = (res: Response) => (me(res).role === 'ADMIN' ? {} : { storeId: me(res).storeId });
-AD.get('/stats', h(async (_, res) => {
-  const since = new Date(); since.setHours(0, 0, 0, 0); const w = { ...scope(res), createdAt: { gte: since } };
-  const [sales, orders, byStatus] = await Promise.all([db.order.aggregate({ where: { ...w, payment: { status: 'PAID' } }, _sum: { total: true } }), db.order.count({ where: w }), db.order.groupBy({ by: ['status'], where: w, _count: true })]);
-  res.json({ todaysSales: num(sales._sum.total ?? 0), todaysOrders: orders, byStatus });
-}));
-AD.get('/orders', h(async (_, res) => res.json(await db.order.findMany({ where: scope(res), include: { items: true, payment: true, delivery: { include: { driver: { include: { user: { select: { name: true } } } } } } }, orderBy: { createdAt: 'desc' }, take: 100 }))));
-AD.patch('/orders/:id/status', h(async (req, res) => {
-  const { status } = z.object({ status: z.enum(['PREPARING', 'PACKED', 'READY_FOR_COLLECTION', 'COLLECTED', 'CANCELLED']) }).parse(req.body);
-  const o = await db.order.findFirst({ where: { id: req.params.id, ...scope(res) }, select: { id: true } }); if (!o) return res.status(404).json({ error: 'Not found' });
-  await db.$transaction(tx => setOrderStatus(tx, o.id, status, me(res).id)); res.json({ ok: true });
-}));
-const prod = z.object({ name: z.string().min(1).max(100), description: z.string().max(500), price: z.number().positive().max(100000), categoryId: z.string(), soldByWeight: z.boolean(), imageUrl: z.string().url().optional(), quantity: z.number().min(0).default(0) });
-AD.post('/products', h(async (req, res) => {
-  const b = prod.parse(req.body); const storeId = me(res).role === 'ADMIN' ? z.string().parse(req.body.storeId) : me(res).storeId!;
-  const { quantity, ...rest } = b; res.status(201).json(await db.product.create({ data: { ...rest, storeId, inventory: { create: { quantity } } } }));
-}));
-AD.patch('/products/:id', h(async (req, res) => {
-  const b = prod.partial().extend({ active: z.boolean().optional() }).parse(req.body); const { quantity, ...rest } = b;
-  const r = await db.product.updateMany({ where: { id: req.params.id, ...scope(res) }, data: rest }); if (!r.count) return res.status(404).json({ error: 'Not found' });
-  if (quantity !== undefined) await db.inventory.upsert({ where: { productId: req.params.id }, update: { quantity }, create: { productId: req.params.id, quantity } }); res.json({ ok: true });
-}));
-AD.delete('/products/:id', h(async (req, res) => { const r = await db.product.updateMany({ where: { id: req.params.id, ...scope(res) }, data: { active: false } }); r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'Not found' }); })); // soft delete keeps order history intact
-AD.get('/inventory', h(async (_, res) => res.json(await db.inventory.findMany({ where: { product: scope(res) }, include: { product: { select: { name: true } } } }))));
-AD.get('/wholesale', need('ADMIN'), h(async (_, res) => res.json(await db.wholesaleRequest.findMany({ orderBy: { createdAt: 'desc' } }))));
-AD.post('/questions/:id/answer', h(async (req, res) => {
-  const { text } = z.object({ text: z.string().min(1).max(500) }).parse(req.body);
-  if (!(await db.question.findFirst({ where: { id: req.params.id, product: scope(res) } }))) return res.status(404).json({ error: 'Question not found' });
-  res.status(201).json(await db.answer.create({ data: { questionId: req.params.id, text, approved: true, authorUserId: me(res).id } }));
-}));
-AD.put('/zones/:id', h(async (req, res) => { const b = z.object({ fee: z.number().min(0).max(5000) }).parse(req.body); const r = await db.deliveryZone.updateMany({ where: { id: req.params.id, store: scope(res).storeId ? { id: scope(res).storeId } : {} }, data: b }); r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'Not found' }); }));
-const AM = express.Router(); AM.use(need('ADMIN'));
-AM.post('/drivers', h(async (req, res) => {
-  const b = z.object({ email: z.string().email(), name: z.string().min(1), password: z.string().min(8), vehicle: z.string().optional() }).parse(req.body);
-  const u = await db.user.create({ data: { email: b.email.toLowerCase(), name: b.name, role: 'DRIVER', passwordHash: await bcrypt.hash(b.password, 12), driver: { create: { vehicle: b.vehicle } } } }); res.status(201).json({ id: u.id });
-}));
-AM.patch('/users/:id/active', h(async (req, res) => { const { active } = z.object({ active: z.boolean() }).parse(req.body); await db.user.update({ where: { id: req.params.id }, data: { active } }); res.json({ ok: true }); }));
-app.use('/api/admin', AD, AM);
+app.use('/api/deliveries', driverRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ---- Vallerie ----
 const aiLimit = rateLimit({ windowMs: 60_000, limit: 15 });

@@ -17,7 +17,18 @@ import { About, Deals, NotFound, Track } from './pages/Info';
 import Checkout from './pages/Checkout';
 import Pay from './pages/Pay';
 import { OrderConfirmation, TrackingPage } from './pages/OrderPages';
+import { PortalLayout, RequireRole } from './components/Portal';
+import DriverPortal from './pages/driver/DriverPortal';
+import AdminLayout from './pages/admin/AdminLayout';
+import { Orders, Overview } from './pages/admin/Orders';
+import { Inventory, Products } from './pages/admin/Products';
+import { Customers, Drivers } from './pages/admin/People';
+import { StoresSettings } from './pages/admin/Settings';
+import { Analytics } from './pages/admin/Analytics';
+import { Questions, WholesaleRequests } from './pages/admin/Inbox';
 import './index.css';
+
+const adminOnly = (el: React.ReactNode) => <RequireRole roles={['ADMIN']} title="Admin-only section">{el}</RequireRole>;
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +61,28 @@ const router = createBrowserRouter([
       { path: '/wholesale', element: <Wholesale /> },
       { path: '*', element: <NotFound /> },
     ],
+  },
+  {
+    path: '/driver', element: <PortalLayout label="Driver" />,
+    children: [{ index: true, element: <RequireRole roles={['DRIVER']} title="Driver portal"><DriverPortal /></RequireRole> }],
+  },
+  {
+    path: '/admin', element: <PortalLayout label="Admin" />,
+    children: [{
+      element: <RequireRole roles={['ADMIN', 'STORE_STAFF']} title="Admin dashboard"><AdminLayout /></RequireRole>,
+      children: [
+        { index: true, element: <Overview /> },
+        { path: 'orders', element: <Orders /> },
+        { path: 'products', element: <Products /> },
+        { path: 'inventory', element: <Inventory /> },
+        { path: 'questions', element: <Questions /> },
+        { path: 'analytics', element: <Analytics /> },
+        { path: 'customers', element: adminOnly(<Customers />) },
+        { path: 'drivers', element: adminOnly(<Drivers />) },
+        { path: 'stores', element: adminOnly(<StoresSettings />) },
+        { path: 'wholesale', element: adminOnly(<WholesaleRequests />) },
+      ],
+    }],
   },
 ]);
 
