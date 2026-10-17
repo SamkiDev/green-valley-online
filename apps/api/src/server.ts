@@ -3,7 +3,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet'; import cookieParser from 'cookie-parser'; import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs'; import jwt from 'jsonwebtoken'; import { z } from 'zod';
 import { PrismaClient, Role, DeliveryStatus, OrderStatus, Prisma } from '@prisma/client';
-import { provider } from './payments'; import { askVallerie } from './ai';
+import { provider } from './payments'; import { askVallerie, mentionedProducts } from './ai';
 
 const db = new PrismaClient();
 const SECRET = process.env.JWT_SECRET; if (!SECRET || SECRET.length < 24) throw new Error('Set a long JWT_SECRET in .env');
@@ -16,7 +16,7 @@ app.use((req, res, next) => { // minimal CORS for the Vite frontend, with creden
 });
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 200 }));
 
-type U = { id: string; role: Role; name: string; storeId?: string; customerId?: string; driverId?: string };
+type U = { id: string; role: Role; name: string; email: string; phone: string | null; storeId?: string; customerId?: string; driverId?: string };
 const h = (fn: (req: Request, res: Response) => Promise<any>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 const me = (res: Response) => res.locals.user as U;
 const num = (d: Prisma.Decimal | number) => Number(d);
@@ -32,7 +32,7 @@ async function load(req: Request, res: Response, next: NextFunction) {
   try {
     const { sub } = jwt.verify(t, SECRET!) as { sub: string };
     const u = await db.user.findUnique({ where: { id: sub }, include: { customer: true, driver: true, staff: true } });
-    if (u?.active) res.locals.user = { id: u.id, role: u.role, name: u.name, storeId: u.staff?.storeId, customerId: u.customer?.id, driverId: u.driver?.id } as U;
+    if (u?.active) res.locals.user = { id: u.id, role: u.role, name: u.name, email: u.email, phone: u.phone, storeId: u.staff?.storeId, customerId: u.customer?.id, driverId: u.driver?.id } as U;
   } catch { /* invalid token = anonymous */ }
   next();
 }
@@ -59,7 +59,7 @@ A.post('/login', authLimit, h(async (req, res) => {
   setSession(res, u.id); res.json({ id: u.id, name: u.name, role: u.role });
 }));
 A.post('/logout', (_, res) => { res.clearCookie('gvo'); res.json({ ok: true }); });
-A.get('/me', (_, res) => res.json(res.locals.user ? { id: me(res).id, name: me(res).name, role: me(res).role } : null));
+A.get('/me', (_, res) => { const u = res.locals.user as U | undefined; res.json(u ? { id: u.id, name: u.name, role: u.role, email: u.email, phone: u.phone } : null); });
 app.use('/api/auth', A);
 
 // ---- public catalogue ----
@@ -126,11 +126,17 @@ function tracking(o: TrackOrder) {
     steps, current: steps[current].key, message, estimatedWindow: deliveryWindow(o), deliveryStatus: d?.status ?? null, simulated: true };
 }
 
+const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
+// South African numbers: 0XX XXX XXXX or +27 XX XXX XXXX (spaces and dashes allowed); stored as entered, trimmed.
+const saPhone = z.string().trim().refine(v => /^(\+27|0)\d{9}$/.test(v.replace(/[\s-]/g, '')), 'Enter a valid South African phone number');
+
 // ---- orders: the server recomputes every price; client totals are ignored ----
 const O = express.Router(); O.use(need('CUSTOMER'));
 O.post('/', h(async (req, res) => {
   const b = z.object({ storeSlug: z.string(), fulfilment: z.enum(['DELIVERY', 'COLLECTION']), zoneId: z.string().optional(),
-    address: z.object({ street: z.string().min(1).max(120), area: z.string().min(1).max(80), city: z.string().max(80), province: z.string().max(80), postalCode: z.string().max(10) }).optional(),
+    contact: z.object({ firstName: z.string().trim().min(1).max(60), lastName: z.string().trim().min(1).max(60), phone: saPhone, email: z.string().trim().email().max(120) }),
+    address: z.object({ street: z.string().trim().min(3).max(120), area: z.string().trim().min(2).max(80), city: z.string().trim().min(2).max(80),
+      province: z.enum(PROVINCES), postalCode: z.string().trim().regex(/^\d{4}$/, 'Use a 4-digit postal code') }).optional(),
     items: z.array(z.object({ productId: z.string(), quantity: z.number().positive().max(100) })).min(1).max(50) }).parse(req.body);
   const store = await db.store.findFirst({ where: { slug: b.storeSlug, status: 'ACTIVE' } }); if (!store) return res.status(400).json({ error: 'Store not available' });
   if (store.ageRestricted) return res.status(400).json({ error: 'Age verification flow required for this store' });
@@ -152,13 +158,14 @@ O.post('/', h(async (req, res) => {
       items.push({ product: { connect: { id: p.id } }, storeId: p.storeId, nameSnapshot: p.name, unitPrice: p.price, quantity: i.quantity, lineTotal: line });
     }
     const addr = b.address ? await tx.address.create({ data: { ...b.address, customerId: me(res).customerId! } }) : null;
-    return tx.order.create({ data: { customerId: me(res).customerId, storeId: store.id, fulfilment: b.fulfilment, subtotal, deliveryFee: fee, total: subtotal.add(fee), addressId: addr?.id, addressText: b.address && `${b.address.street}, ${b.address.area}`, area: b.address?.area, items: { create: items }, events: { create: { status: 'PLACED', actorUserId: me(res).id } } }, include: { items: true } });
+    return tx.order.create({ data: { customerId: me(res).customerId, storeId: store.id, fulfilment: b.fulfilment,
+      contactName: `${b.contact.firstName} ${b.contact.lastName}`, contactPhone: b.contact.phone, contactEmail: b.contact.email.toLowerCase(), subtotal, deliveryFee: fee, total: subtotal.add(fee), addressId: addr?.id, addressText: b.address && `${b.address.street}, ${b.address.area}`, area: b.address?.area, items: { create: items }, events: { create: { status: 'PLACED', actorUserId: me(res).id } } }, include: { items: true } });
   });
   res.status(201).json({ ...order, orderNumber: orderNo(order.seq) });
 }));
 O.get('/', h(async (_, res) => res.json((await db.order.findMany({ where: { customerId: me(res).customerId }, include: { items: true, payment: true, delivery: { select: { status: true } } }, orderBy: { createdAt: 'desc' } })).map(o => ({ ...o, orderNumber: orderNo(o.seq) })))));
 O.get('/:id', h(async (req, res) => {
-  const o = await db.order.findFirst({ where: { id: req.params.id, customerId: me(res).customerId }, include: { items: true, payment: { select: { id: true, status: true, method: true, provider: true, providerRef: true, createdAt: true } }, store: { select: { slug: true, name: true, config: true } } } });
+  const o = await db.order.findFirst({ where: { id: req.params.id, customerId: me(res).customerId }, include: { items: { include: { product: { select: { soldByWeight: true } } } }, address: { select: { street: true, area: true, city: true, province: true, postalCode: true } }, payment: { select: { id: true, status: true, method: true, provider: true, providerRef: true, createdAt: true } }, store: { select: { slug: true, name: true, config: true } } } });
   if (!o) return res.status(404).json({ error: 'Order not found' });
   res.json({ ...o, orderNumber: orderNo(o.seq), estimatedWindow: deliveryWindow(o) });
 }));
@@ -276,7 +283,10 @@ app.post('/api/ai/chat', aiLimit, h(async (req, res) => {
   let own = ''; const u = res.locals.user as U | undefined;
   if (u?.customerId) { const o = await db.order.findFirst({ where: { customerId: u.customerId }, orderBy: { createdAt: 'desc' }, include: { delivery: true } }); if (o) own = `Customer's latest order ${orderNo(o.seq)}: status ${o.status}${o.delivery ? ', delivery ' + o.delivery.status : ''}. Total R${num(o.total).toFixed(2)}.`; }
   const ctx = `Store: ${store.name} - ${store.description}\nAll prices are DEMO prices in ZAR.\nDelivery zones (demo fees): ${store.zones.map(z => `${z.name} R${num(z.fee)}`).join('; ')}. Collection from store is also available.${Array.isArray((store.config as any)?.deliveryWindowMinutes) ? ` Demo delivery estimate: about ${(store.config as any).deliveryWindowMinutes[0]}-${(store.config as any).deliveryWindowMinutes[1]} minutes after payment (an estimate, not a guarantee).` : ' No delivery time estimate is configured.'} Weight-based prices are per kg; the final price may vary slightly based on the actual weighed quantity. Payment is currently a DEMO (no real money). Large or business orders can use the Bulk & Wholesale quote form.\nCATALOGUE:\n${catalogue}\nAPPROVED Q&A:\n${qa || 'none'}\n${own}`;
-  try { res.json({ reply: await askVallerie(ctx, b.history, b.message) }); }
+  try {
+    const reply = await askVallerie(ctx, b.history, b.message);
+    res.json({ reply, products: mentionedProducts(reply, prods) });
+  }
   catch (e) { console.error('AI error', (e as Error).message); res.status(503).json({ error: 'AI_UNAVAILABLE', reply: 'Vallerie is temporarily unavailable. You can continue shopping normally.' }); }
 }));
 

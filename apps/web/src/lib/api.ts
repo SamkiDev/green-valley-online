@@ -27,7 +27,30 @@ export type Product = {
   store?: { slug: string; name: string };
 };
 export type QA = { id: string; text: string; createdAt: string; answers: { text: string }[] };
-export type Me = { id: string; name: string; role: 'CUSTOMER' | 'STORE_STAFF' | 'DRIVER' | 'ADMIN' } | null;
+export type Me = { id: string; name: string; role: 'CUSTOMER' | 'STORE_STAFF' | 'DRIVER' | 'ADMIN'; email: string; phone: string | null } | null;
+export type OrderItem = { id: string; productId: string; nameSnapshot: string; unitPrice: string; quantity: string; lineTotal: string; product: { soldByWeight: boolean } };
+export const itemQty = (i: OrderItem) => (i.product.soldByWeight ? `${Number(i.quantity)} kg` : `× ${Number(i.quantity)}`);
+export type Window = { from: string; to: string; demo: boolean } | null;
+export type OrderDetail = {
+  id: string; orderNumber: string; status: string; fulfilment: 'DELIVERY' | 'COLLECTION'; createdAt: string;
+  subtotal: string; deliveryFee: string; total: string; contactName: string | null; contactPhone: string | null; contactEmail: string | null;
+  area: string | null; address: { street: string; area: string; city: string; province: string; postalCode: string } | null;
+  items: OrderItem[]; payment: { id: string; status: string; method: string; provider: string; providerRef: string | null; createdAt: string } | null;
+  store: { slug: string; name: string; config: StoreConfig }; estimatedWindow: Window;
+};
+export type Tracking = {
+  orderId: string; orderNumber: string; status: string; fulfilment: 'DELIVERY' | 'COLLECTION'; payment: string;
+  steps: { key: string; label: string; at: string | null }[]; current: string; message: string | null;
+  estimatedWindow: Window; deliveryStatus: string | null; simulated: boolean;
+};
+export type ChatMsg = { role: 'user' | 'assistant'; content: string };
+export type ChatProduct = Pick<Product, 'id' | 'name' | 'price' | 'soldByWeight' | 'category' | 'imageUrl' | 'inventory'>;
+export type ChatResponse = { reply: string; products?: ChatProduct[]; error?: string };
+export type PayResponse = { paymentId: string; providerRef: string; orderId: string; orderNumber: string; status: 'PAID' | 'FAILED'; demo: boolean };
+
+export const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
+export const isSaPhone = (v: string) => /^(\+27|0)\d{9}$/.test(v.replace(/[\s-]/g, ''));
+export const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 export type OrderSummary = {
   id: string; orderNumber: string; status: string; fulfilment: 'DELIVERY' | 'COLLECTION'; total: string; createdAt: string;
   items: { id: string; nameSnapshot: string; quantity: string }[]; payment: { status: string } | null; delivery: { status: string } | null;
@@ -55,6 +78,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status === 503 && data?.reply) throw new ApiError(503, data.reply); // e.g. Vallerie's fallback message
     const msg = res.status === 429 ? 'Too many requests. Please wait a moment and try again.'
       : res.status >= 500 && !data?.error ? 'Something went wrong on our side. Please try again.'
       : data?.error || `Request failed (${res.status})`;

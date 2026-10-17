@@ -1,6 +1,7 @@
 // Vallerie: the model only RECOMMENDS and EXPLAINS. Context comes from the database; no tools/actions are exposed to it.
 // Provider is chosen by AI_PROVIDER (anthropic | xai). Keys live only in server env vars.
 import Anthropic from '@anthropic-ai/sdk';
+import type { Prisma } from '@prisma/client';
 
 export const SYSTEM_PROMPT = `You are Vallerie, the shopping assistant for Green Valley Online.
 You help customers discover products and understand the shopping process.
@@ -64,4 +65,16 @@ function trimHistory(history: Msg[]): Msg[] {
   const h = history.slice(-6);
   while (h.length && h[0].role !== 'user') h.shift();
   return h;
+}
+
+// Products named in Vallerie's reply, looked up in the database (names, prices and stock come from the DB, never the model),
+// so the widget can offer real "Add to cart" buttons. Longest names match first so "Family Braai Pack" isn't also "Braai Pack".
+export type CatalogueProduct = Prisma.ProductGetPayload<{ include: { category: true; inventory: true } }>;
+export function mentionedProducts(reply: string, prods: CatalogueProduct[]) {
+  let text = reply.toLowerCase(); const found: { p: CatalogueProduct; at: number }[] = [];
+  for (const p of [...prods].sort((a, b) => b.name.length - a.name.length)) {
+    const at = text.indexOf(p.name.toLowerCase()); if (at < 0) continue;
+    found.push({ p, at }); text = text.split(p.name.toLowerCase()).join(' '.repeat(p.name.length));
+  }
+  return found.sort((a, b) => a.at - b.at).slice(0, 6).map(({ p }) => ({ id: p.id, name: p.name, price: p.price, soldByWeight: p.soldByWeight, category: { id: p.category.id, name: p.category.name }, imageUrl: p.imageUrl, inventory: p.inventory && { quantity: p.inventory.quantity, lowThreshold: p.inventory.lowThreshold } }));
 }

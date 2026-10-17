@@ -1,7 +1,7 @@
-// Smaller pages: Deals, Track Order, About, Checkout (next stage) and Not Found.
+// Smaller pages: Deals, Track Order (order list), About and Not Found.
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Compass, CreditCard, Package, Tag } from 'lucide-react';
+import { ArrowRight, Compass, Package, Tag } from 'lucide-react';
 import { api, type OrderSummary } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { useProducts } from '../lib/queries';
@@ -49,10 +49,15 @@ export function Track() {
             return (
               <li key={o.id} className="card flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
-                  <p className="font-extrabold">#{o.orderNumber}</p>
+                  <Link to={`/track/${o.id}`} className="font-extrabold hover:underline">#{o.orderNumber}</Link>
                   <p className="text-sm text-ink-2">{new Date(o.createdAt).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' })} · {o.items.length} {o.items.length === 1 ? 'item' : 'items'} · {o.fulfilment === 'DELIVERY' ? 'Delivery' : 'Collection'}</p>
                 </div>
-                <div className="flex items-center gap-3"><Badge tone={s.tone}>{s.label}</Badge><span className="font-bold tabular-nums">{rand(o.total)}</span></div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Badge tone={s.tone}>{s.label}</Badge><span className="font-bold tabular-nums">{rand(o.total)}</span>
+                  {o.status === 'PLACED' && o.payment?.status !== 'PAID'
+                    ? <LinkButton to={`/checkout/pay/${o.id}`} size="sm">Complete payment</LinkButton>
+                    : <LinkButton to={`/track/${o.id}`} size="sm" variant="secondary">Track</LinkButton>}
+                </div>
               </li>
             );
           })}
@@ -74,17 +79,6 @@ export function About() {
           <p className="mt-1">Prices are demo prices, delivery fees are demo fees, and payments are simulated. No money is charged and no card details are collected.</p>
         </div>
       </div>
-    </div>
-  );
-}
-
-export function CheckoutNext() {
-  return (
-    <div className="container-page">
-      <PageHeader eyebrow="Checkout" title="Checkout" />
-      <EmptyState icon={CreditCard} title="Checkout is coming in the next build" action={<LinkButton to="/cart" variant="secondary">Back to cart</LinkButton>}>
-        Customer details, delivery address, demo payment and order confirmation are being added next. Your cart is saved on this device.
-      </EmptyState>
     </div>
   );
 }

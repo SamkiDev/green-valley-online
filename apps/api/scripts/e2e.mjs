@@ -44,15 +44,20 @@ r = await cust('GET', '/auth/me');
 ok(r.s === 200 && r.j?.role === 'CUSTOMER', '/auth/me returns session user');
 
 const address = { street: '12 Demo Street', area: 'Demo Area', city: 'Johannesburg', province: 'Gauteng', postalCode: '2000' };
-r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, items: [{ productId: P('Braai Pack').id, quantity: 1.5 }] });
+const contact = { firstName: 'E2E', lastName: 'Customer', phone: '011 000 0000', email: 'e2e-contact@demo.local' };
+r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address: { ...address, postalCode: '20' }, contact: { ...contact, phone: '12345' }, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+ok(r.s === 400 && r.j.details?.contact && r.j.details?.address, 'bad phone and postal code rejected', Object.keys(r.j?.details || {}).join(','));
+r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'COLLECTION', items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+ok(r.s === 400, 'order without contact details rejected');
+r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, contact, items: [{ productId: P('Braai Pack').id, quantity: 1.5 }] });
 ok(r.s === 400, 'fractional qty for per-item product rejected', r.j?.error);
-r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, items: [{ productId: P('T-Bone Steak').id, quantity: 1 }] });
+r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, contact, items: [{ productId: P('T-Bone Steak').id, quantity: 1 }] });
 ok(r.s === 409, 'out-of-stock product rejected (409)', r.j?.error);
-r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', address, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', address, contact, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
 ok(r.s === 400, 'delivery without zone rejected', r.j?.error);
 
 const stockBefore = Number((await anon('GET', '/products/' + P('Boerewors').id)).j.inventory.quantity);
-r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, subtotal: 1, total: 1, // client totals must be ignored
+r = await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, contact, subtotal: 1, total: 1, // client totals must be ignored
   items: [{ productId: P('Family Braai Pack').id, quantity: 1 }, { productId: P('Boerewors').id, quantity: 1.5 }, { productId: P('Chicken Wings').id, quantity: 1 }] });
 const expectSub = 749.97; // 549.99 + 134.99 (1.5 kg x 89.99 = 134.985, half-up) + 64.99
 ok(r.s === 201 && Number(r.j.subtotal) === expectSub && Number(r.j.deliveryFee) === 40 && Number(r.j.total) === Math.round((expectSub + 40) * 100) / 100,

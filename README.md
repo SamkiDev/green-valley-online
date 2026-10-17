@@ -61,6 +61,9 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 - `AI_PROVIDER=anthropic` (default, model `ANTHROPIC_MODEL`, default `claude-opus-5-5`) or `AI_PROVIDER=xai` (`XAI_API_KEY`, `XAI_MODEL`).
 - Keys are server-side env vars only. Rate limited (15/min) with a timeout (`AI_TIMEOUT_MS`).
 - With no key, or if the provider fails, the route returns 503 with *"Vallerie is temporarily unavailable. You can continue shopping normally."*
+- The reply also carries the catalogue products it names, looked up in the database (price and stock from the DB, never the model), so the widget shows real Add buttons.
+
+**To switch Vallerie on:** put your key in `apps/api/.env` yourself (`ANTHROPIC_API_KEY=...`, or `AI_PROVIDER=xai` with `XAI_API_KEY` and `XAI_MODEL`) and restart the API. Never commit it; `.env` is git-ignored.
 
 ## API (Stage 1)
 
@@ -77,8 +80,8 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 ## Stages
 
 1. ✅ API running; end-to-end flow tested (register → order → demo pay → driver advance → tracking → AI fallback)
-2. `apps/web`: home, stores, shop, product, cart
-3. Checkout, demo payment, confirmation, tracking, Vallerie widget
+2. ✅ `apps/web`: home, stores, shop, product, cart
+3. ✅ Checkout (details → delivery or collection → address → review), DEMO payment, confirmation, live tracking (polls every 8 s), Vallerie widget
 4. Driver portal and admin dashboard
 5. Account, reviews, Q&A, bulk, guest checkout, liquor age verification
 6. Image storage, real payment provider, GPS tracking

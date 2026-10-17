@@ -184,9 +184,10 @@ model Order {
   customer Customer? @relation(fields: [customerId], references: [id])
   storeId String // primary store; each item carries its own storeId for future multi-store orders
   store Store @relation(fields: [storeId], references: [id])
-  guestName String?
-  guestPhone String?
-  guestEmail String?
+  // Contact details captured at checkout (for signed-in customers and, later, guests)
+  contactName String?
+  contactPhone String?
+  contactEmail String?
   addressId String?
   address Address? @relation(fields: [addressId], references: [id])
   addressText String?

@@ -5,6 +5,7 @@ import { useCart } from '../lib/cart';
 import { useMe } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { firstName } from '../lib/format';
+import { Vallerie } from './Vallerie';
 
 const NAV = [
   { to: '/', label: 'Home', end: true },
@@ -167,6 +168,7 @@ export function Layout() {
       <Footer />
       <div className="h-16 lg:hidden" aria-hidden />
       <BottomNav />
+      <Vallerie />
       <ScrollRestoration />
     </div>
   );
