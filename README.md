@@ -9,8 +9,8 @@ E-commerce and local-delivery platform MVP for the Green Valley shopping centre 
 ## Layout
 
 ```
-apps/api   Express + TypeScript + Zod + Prisma (PostgreSQL)   ← Stage 1, running
-apps/web   React + TypeScript + Vite + Tailwind               ← Stage 2, not started
+apps/api   Express + TypeScript + Zod + Prisma (PostgreSQL)   ← Stage 1
+apps/web   React + TypeScript + Vite + Tailwind v4            ← Stage 2 (storefront)
 docker-compose.yml   local PostgreSQL 16
 ```
 
@@ -25,6 +25,16 @@ npx prisma migrate dev                          # create tables (also seeds)
 npm run dev                                     # API on http://localhost:4000
 npm run test:e2e                                # in a second terminal, on a fresh DB
 ```
+
+Then, from the repo root in another terminal:
+
+```bash
+npm run dev:web                                 # storefront on http://localhost:5180 (proxies /api to :4000)
+```
+
+Port 5180 is used because 5173 is often taken by other Vite projects. If npm ever skips native packages
+(error mentioning `@tailwindcss/oxide-win32-x64-msvc` or a Rolldown binding), delete `node_modules` and
+`package-lock.json` and run `npm install` again.
 
 `npm run db:reset` (in `apps/api`) wipes and reseeds the local demo database, so the next order is **#GV10284** again.
 

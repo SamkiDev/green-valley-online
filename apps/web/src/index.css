@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/* Theme is set on <html data-theme="light|dark"> (see index.html and lib/theme.tsx). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Design tokens. Every text/background pair used for text keeps 4.5:1 or better in both themes. */
+:root {
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --surface-2: #f0eee8;
+  --ink: #17191c;
+  --ink-2: #454a52;
+  --ink-3: #5f646c;
+  --line: #e2dfd6;
+  --brand: #166534;        /* Green Valley green: buttons, links */
+  --on-brand: #ffffff;
+  --brand-text: #166534;
+  --brand-soft: #e6f1e9;
+  --meat: #b91c1c;         /* Meat Market red */
+  --on-meat: #ffffff;
+  --meat-text: #b91c1c;
+  --meat-soft: #fbeaea;
+  --panel: #131517;        /* dark feature panels (hero, Meat Market) in both themes */
+  --on-panel: #f4f3ef;
+  --on-panel-2: #c9ccd1;
+  --warn-bg: #fef3c7;
+  --warn-text: #7c2d12;
+  --danger-bg: #fdecec;
+  --danger-text: #9f1239;
+  --ok-bg: #e6f1e9;
+  --ok-text: #14532d;
+  --focus: #2563eb;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1113;
+  --surface: #171a1d;
+  --surface-2: #1f2327;
+  --ink: #f2f2ef;
+  --ink-2: #c4c8ce;
+  --ink-3: #a3a9b1;
+  --line: #2c3137;
+  --brand: #4ade80;
+  --on-brand: #052e16;
+  --brand-text: #6ee7a0;
+  --brand-soft: #12261a;
+  --meat: #ef4444;
+  --on-meat: #1a0505;
+  --meat-text: #fca5a5;
+  --meat-soft: #2a1414;
+  --panel: #0a0b0c;
+  --on-panel: #f4f3ef;
+  --on-panel-2: #c9ccd1;
+  --warn-bg: #3a2a0a;
+  --warn-text: #fcd34d;
+  --danger-bg: #3a1218;
+  --danger-text: #fda4af;
+  --ok-bg: #12261a;
+  --ok-text: #86efac;
+  --focus: #93c5fd;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-on-brand: var(--on-brand);
+  --color-brand-text: var(--brand-text);
+  --color-brand-soft: var(--brand-soft);
+  --color-meat: var(--meat);
+  --color-on-meat: var(--on-meat);
+  --color-meat-text: var(--meat-text);
+  --color-meat-soft: var(--meat-soft);
+  --color-panel: var(--panel);
+  --color-on-panel: var(--on-panel);
+  --color-on-panel-2: var(--on-panel-2);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-text: var(--warn-text);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-text: var(--danger-text);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-text: var(--ok-text);
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
+  ::selection { background: var(--brand-soft); color: var(--ink); }
+}
+
+@layer components {
+  .container-page { width: 100%; max-width: 76rem; margin-inline: auto; padding-inline: 1rem; }
+  @media (min-width: 768px) { .container-page { padding-inline: 1.5rem; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 1rem; }
+  .field {
+    width: 100%; min-height: 2.75rem; border-radius: 0.75rem; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink); padding: 0.625rem 0.875rem; font-size: 1rem;
+  }
+  .field::placeholder { color: var(--ink-3); }
+  .field:focus { outline: 2px solid var(--focus); outline-offset: 0; border-color: transparent; }
+  .field[aria-invalid="true"] { border-color: var(--danger-text); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-rise { animation: rise 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+}
