@@ -1,0 +1,13 @@
+{
+  "name": "green-valley-online",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "dev:api": "npm run dev -w apps/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
