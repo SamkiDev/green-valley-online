@@ -118,8 +118,9 @@ adminRoutes.post('/products', h(async (req, res) => {
 }));
 adminRoutes.patch('/products/:id', h(async (req, res) => {
   const { quantity, lowThreshold, ...data } = productInput.partial().parse(req.body);
-  const r = await db.product.updateMany({ where: { id: req.params.id, ...scope(res), deletedAt: null }, data });
-  if (!r.count) return res.status(404).json({ error: 'Product not found' });
+  // Check access first: a stock-only update has no product fields, and updateMany with empty data matches nothing.
+  if (!(await db.product.findFirst({ where: { id: req.params.id, ...scope(res), deletedAt: null }, select: { id: true } }))) return res.status(404).json({ error: 'Product not found' });
+  if (Object.keys(data).length) await db.product.update({ where: { id: req.params.id }, data });
   const inv = inventoryOf(quantity, lowThreshold);
   if (Object.keys(inv).length) await db.inventory.upsert({ where: { productId: req.params.id }, update: inv, create: { productId: req.params.id, quantity: quantity ?? 0, ...(lowThreshold !== undefined ? { lowThreshold } : {}) } });
   res.json({ ok: true });
@@ -143,6 +144,13 @@ adminRoutes.post('/questions/:id/answer', h(async (req, res) => {
   const { text } = z.object({ text: z.string().trim().min(1).max(500) }).parse(req.body);
   if (!(await db.question.findFirst({ where: { id: req.params.id, product: scope(res) } }))) return res.status(404).json({ error: 'Question not found' });
   res.status(201).json(await db.answer.create({ data: { questionId: req.params.id, text, approved: true, authorUserId: me(res).id } }));
+}));
+
+// ---- review moderation ----
+adminRoutes.get('/reviews', h(async (_, res) => res.json(await db.review.findMany({ where: { store: scope(res).storeId ? { id: scope(res).storeId } : {} }, include: { product: { select: { name: true } }, store: { select: { name: true } }, customer: { select: { user: { select: { name: true } } } } }, orderBy: { createdAt: 'desc' }, take: 200 }))));
+adminRoutes.delete('/reviews/:id', h(async (req, res) => {
+  const r = await db.review.deleteMany({ where: { id: req.params.id, ...(scope(res).storeId ? { storeId: scope(res).storeId } : {}) } });
+  r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'Review not found' });
 }));
 
 // ---- analytics (paid orders only) ----

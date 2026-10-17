@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { MessageSquareText, Warehouse } from 'lucide-react';
+import { MessageSquareText, Star, Warehouse } from 'lucide-react';
+import { Stars } from '../../components/Reviews';
 import { api } from '../../lib/api';
 import { dateTime } from '../../lib/format';
 import { Badge, Button, EmptyState, ErrorState, Skeleton } from '../../components/ui';
@@ -65,5 +66,34 @@ function QuestionCard({ item }: { item: Question }) {
       </form>
       {answer.isError && <p className="mt-2 text-sm text-danger-text" role="alert">{answer.error.message}</p>}
     </li>
+  );
+}
+
+type AdminReview = { id: string; rating: number; comment: string; createdAt: string; product: { name: string } | null; store: { name: string }; customer: { user: { name: string } } };
+
+export function ReviewsModeration() {
+  const q = useAdmin<AdminReview[]>('/reviews');
+  const remove = useAdminMutation((id: string) => api(`/admin/reviews/${id}`, { method: 'DELETE' }));
+  return (
+    <>
+      <AdminHeader title="Reviews">Only customers with a delivered or collected order can review. Remove reviews that break your rules.</AdminHeader>
+      {remove.isError && <p className="mb-3 rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text" role="alert">{remove.error.message}</p>}
+      {q.isPending ? <Skeleton className="h-64" /> : q.isError ? <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
+        : q.data.length === 0 ? <EmptyState icon={Star} title="No reviews yet" /> : (
+          <ul className="space-y-3">
+            {q.data.map(r => (
+              <li key={r.id} className="card flex flex-wrap items-start justify-between gap-3 p-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-ink-3">{r.product ? r.product.name : `${r.store.name} (store)`} · {r.customer.user.name} · {dateTime(r.createdAt)}</p>
+                  <p className="mt-1"><Stars value={r.rating} /></p>
+                  <p className="mt-1 text-ink-2">{r.comment}</p>
+                </div>
+                <Button size="sm" variant="ghost" className="text-danger-text" busy={remove.isPending && remove.variables === r.id}
+                  onClick={() => window.confirm('Remove this review? This cannot be undone.') && remove.mutate(r.id)}>Remove</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+    </>
   );
 }

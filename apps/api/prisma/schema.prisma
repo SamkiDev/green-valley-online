@@ -169,8 +169,11 @@ model CartItem {
 }
 model Address {
   id String @id @default(cuid())
-  customerId String
-  customer Customer @relation(fields: [customerId], references: [id])
+  customerId String? // null for guest orders
+  customer Customer? @relation(fields: [customerId], references: [id])
+  saved Boolean @default(false) // true = shown in the customer's saved addresses
+  label String?
+  createdAt DateTime @default(now())
   street String
   area String
   city String
@@ -189,6 +192,7 @@ model Order {
   contactName String?
   contactPhone String?
   contactEmail String?
+  ageConfirmedAt DateTime? // set when the customer confirmed their age for an age-restricted store
   addressId String?
   address Address? @relation(fields: [addressId], references: [id])
   addressText String?

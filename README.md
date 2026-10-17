@@ -65,6 +65,11 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 
 **To switch Vallerie on:** put your key in `apps/api/.env` yourself (`ANTHROPIC_API_KEY=...`, or `AI_PROVIDER=xai` with `XAI_API_KEY` and `XAI_MODEL`) and restart the API. Never commit it; `.env` is git-ignored.
 
+## Guest checkout and age-restricted stores
+
+- **Guests** can check out without an account. Each guest order gets an access token (an HMAC of the order id, nothing stored) that this device keeps; anyone can also find an order on *Track Order* with its number and the checkout email (rate limited).
+- **Age-restricted stores** (Bottle Liquors): the shop and product pages ask for a date of birth (self-declared, not saved), checkout needs an explicit confirmation that the API enforces and records (`Order.ageConfirmedAt`), and drivers see a CHECK ID badge. The minimum age and any compliance text come from the store settings. Bottle Liquors has no delivery zones yet, so it is collection-only until an admin adds zones.
+
 ## Portals
 
 - **Driver** `/driver`: sign in as a driver. Today's deliveries with ACCEPT DELIVERY, START DELIVERY, ARRIVED, DELIVERED (DELIVERED asks for a second tap). Each action sends the status the driver saw, so a double tap can't skip a step; the customer's tracking page updates within seconds.
@@ -88,5 +93,5 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 2. ✅ `apps/web`: home, stores, shop, product, cart
 3. ✅ Checkout (details → delivery or collection → address → review), DEMO payment, confirmation, live tracking (polls every 8 s), Vallerie widget
 4. ✅ Driver portal (`/driver`) and admin dashboard (`/admin`): orders, driver assignment, products, inventory, Q&A, analytics; admin-only customers, drivers, stores & settings, bulk quotes
-5. Account, reviews, Q&A, bulk, guest checkout, liquor age verification
+5. ✅ Account (profile, password, saved addresses, favourites, ORDER AGAIN), store and product reviews (completed orders only), guest checkout with track-by-number-and-email, multi-store cart, liquor age verification
 6. Image storage, real payment provider, GPS tracking

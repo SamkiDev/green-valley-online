@@ -5,6 +5,7 @@ import { api, ApiError, itemQty, type OrderDetail, type Tracking } from '../lib/
 import { dateTime, rand, time, windowLabel } from '../lib/format';
 import { Badge, DemoTag, EmptyState, ErrorState, LinkButton, Skeleton } from '../components/ui';
 import { WhatsAppButton } from '../components/WhatsAppButton';
+import { ReorderButton } from '../components/ReorderButton';
 
 function NotFoundOrError({ error, retry }: { error: Error; retry: () => void }) {
   if (error instanceof ApiError && (error.status === 404 || error.status === 401 || error.status === 403))
@@ -35,6 +36,11 @@ export function OrderConfirmation() {
           <LinkButton to="/shop" size="lg" variant={paid ? 'onPanel' : 'secondary'}>Keep shopping</LinkButton>
         </div>
       </section>
+
+      {o.guest && (
+        <p className="card mt-4 p-4 text-sm text-ink-2">You checked out as a guest. Keep your order number <strong className="text-ink">#{o.orderNumber}</strong>: you can track this order any time from <Link to="/track" className="font-semibold text-brand-text underline">Track Order</Link> with the email {o.contactEmail}. <Link to="/account" className="font-semibold text-brand-text underline">Create an account</Link> to save addresses and order again.</p>
+      )}
+      {!o.guest && (o.status === 'DELIVERED' || o.status === 'COLLECTED') && <div className="mt-4 flex justify-end"><ReorderButton orderId={o.id} size="md" /></div>}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <section className="card p-5" aria-labelledby="ful">
@@ -95,7 +101,7 @@ export function TrackingPage() {
 
   return (
     <div className="container-page max-w-3xl py-6 md:py-10">
-      <nav className="mb-4 text-sm text-ink-3" aria-label="Breadcrumb"><Link to="/track" className="hover:underline">My orders</Link> / <span className="text-ink-2">#{t.orderNumber}</span></nav>
+      <nav className="mb-4 text-sm text-ink-3" aria-label="Breadcrumb"><Link to="/track" className="hover:underline">Track Order</Link> / <span className="text-ink-2">#{t.orderNumber}</span></nav>
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wider text-brand-text">Tracking</p>

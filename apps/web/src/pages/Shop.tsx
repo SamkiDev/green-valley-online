@@ -1,15 +1,31 @@
 import { useEffect, useId, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { Search, SearchX, X } from 'lucide-react';
-import { useCategories, useProducts, type ProductFilters } from '../lib/queries';
+import { Search, SearchX, Store as StoreIcon, X } from 'lucide-react';
+import { useProducts, useStores, type ProductFilters } from '../lib/queries';
 import { parseSearch, rand } from '../lib/format';
 import { ProductCard, ProductGridSkeleton } from '../components/ProductCard';
-import { Button, ErrorState, EmptyState, PageHeader } from '../components/ui';
+import { Button, ErrorState, EmptyState, LinkButton, PageHeader, Skeleton } from '../components/ui';
+import { AgeGate } from '../components/AgeGate';
+import { DEFAULT_STORE } from '../lib/cart';
 
 const PRICE_CAPS = [100, 200, 300, 500];
 const SORTS = [{ v: 'popular', l: 'Most popular' }, { v: 'low', l: 'Price: low to high' }, { v: 'high', l: 'Price: high to low' }] as const;
 
 export default function Shop() {
+  const [params] = useSearchParams();
+  const slug = params.get('store') || DEFAULT_STORE;
+  const stores = useStores();
+  if (stores.isPending) return <div className="container-page py-8"><Skeleton className="h-64" /></div>;
+  if (stores.isError) return <div className="container-page py-8"><ErrorState message={stores.error.message} onRetry={() => stores.refetch()} /></div>;
+  const store = stores.data.find(x => x.slug === slug);
+  if (!store || store.status !== 'ACTIVE')
+    return <div className="container-page py-10"><EmptyState icon={StoreIcon} title={store ? `${store.name} isn't online yet` : 'Store not found'} action={<LinkButton to="/stores" variant="secondary">See all stores</LinkButton>}>{store ? 'This store is coming soon.' : 'Choose a store to start shopping.'}</EmptyState></div>;
+  const others = stores.data.filter(x => x.status === 'ACTIVE');
+  const view = <ShopView key={slug} slug={slug} name={store.name} description={store.description} stores={others} />;
+  return store.ageRestricted ? <AgeGate slug={slug} storeName={store.name} config={store.config}>{view}</AgeGate> : view;
+}
+
+function ShopView({ slug, name, description, stores }: { slug: string; name: string; description: string | null; stores: { slug: string; name: string }[] }) {
   const [params, setParams] = useSearchParams();
   const ids = { search: useId(), price: useId(), sort: useId() };
   const rawQ = params.get('q') ?? '';
@@ -21,9 +37,11 @@ export default function Shop() {
   // "under R300" typed into search becomes a price cap; the rest is the text query.
   const parsed = parseSearch(rawQ);
   const max = maxParam ?? parsed.max;
-  const filters: ProductFilters = { store: 'meat-market', q: parsed.text || undefined, category: category || undefined, max, inStock, sort };
+  const filters: ProductFilters = { store: slug, q: parsed.text || undefined, category: category || undefined, max, inStock, sort };
   const products = useProducts(filters);
-  const categories = useCategories();
+  // Category chips come from what this store actually sells.
+  const all = useProducts({ store: slug });
+  const categories = { data: [...new Map((all.data ?? []).map(p => [p.category.name, p.category])).values()].sort((a, b) => a.name.localeCompare(b.name)) };
 
   const [draft, setDraft] = useState(rawQ);
   useEffect(() => setDraft(rawQ), [rawQ]);
@@ -44,7 +62,12 @@ export default function Shop() {
 
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Green Valley Meat Market" title="Shop">Fresh cuts, chicken and braai packs. Weighed items are priced per kg. <span className="text-ink-3">Demo prices.</span></PageHeader>
+      <PageHeader eyebrow={name} title="Shop">{description ?? ''} Weighed items are priced per kg. <span className="text-ink-3">Demo prices.</span></PageHeader>
+      {stores.length > 1 && (
+        <nav aria-label="Choose a store" className="-mt-2 mb-4 flex flex-wrap gap-2">
+          {stores.map(x => <LinkButton key={x.slug} to={`/shop?store=${x.slug}`} size="sm" variant={x.slug === slug ? 'primary' : 'secondary'} aria-current={x.slug === slug ? 'page' : undefined}>{x.name.replace('Green Valley ', '')}</LinkButton>)}
+        </nav>
+      )}
 
       <div className="sticky top-16 z-30 -mx-4 space-y-3 border-b border-line bg-bg/95 px-4 pb-3 pt-1 backdrop-blur md:-mx-6 md:px-6">
         <form role="search" onSubmit={e => { e.preventDefault(); update({ q: draft.trim() || null }); }} className="relative">
@@ -79,13 +102,13 @@ export default function Shop() {
           <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-line bg-surface px-3 text-sm font-semibold">
             <input type="checkbox" className="size-4 accent-[var(--brand)]" checked={inStock} onChange={e => update({ stock: e.target.checked ? '1' : null })} /> In stock only
           </label>
-          {anyFilter && <Button variant="ghost" size="sm" onClick={() => { setDraft(''); setParams({}, { replace: true }); }}>Clear all</Button>}
+          {anyFilter && <Button variant="ghost" size="sm" onClick={() => { setDraft(''); setParams({ store: slug }, { replace: true }); }}>Clear all</Button>}
         </div>
       </div>
 
       <div className="pt-5" aria-live="polite">
         {products.isPending ? <ProductGridSkeleton /> : products.isError ? <ErrorState message={products.error.message} onRetry={() => products.refetch()} /> : products.data.length === 0 ? (
-          <EmptyState icon={SearchX} title="No products match" action={anyFilter ? <Button variant="secondary" onClick={() => { setDraft(''); setParams({}, { replace: true }); }}>Clear filters</Button> : undefined}>
+          <EmptyState icon={SearchX} title="No products match" action={anyFilter ? <Button variant="secondary" onClick={() => { setDraft(''); setParams({ store: slug }, { replace: true }); }}>Clear filters</Button> : undefined}>
             {parsed.text ? <>Nothing found for “{parsed.text}”{max ? ` under ${rand(max)}` : ''}. Try another word, like “chicken” or “braai”.</> : 'Try removing a filter.'}
           </EmptyState>
         ) : (

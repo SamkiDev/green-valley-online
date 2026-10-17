@@ -2,11 +2,12 @@
 // The server re-validates everything and recomputes prices, fees and totals; nothing here is trusted.
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, LogIn, MapPin, ShoppingBag, Store as StoreIcon, Truck } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, ArrowRight, LogIn, MapPin, ShieldAlert, ShoppingBag, Store as StoreIcon, Truck, UserRound } from 'lucide-react';
 import { api, ApiError, available, isEmail, isSaPhone, PROVINCES, type OrderDetail, type Product } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { useCart } from '../lib/cart';
+import { useCart, useForceCollection } from '../lib/cart';
+import { rememberGuestOrder } from '../lib/guestOrders';
 import { useProducts, useStore } from '../lib/queries';
 import { lineTotal, qtyLabel, rand } from '../lib/format';
 import { CheckoutSteps } from '../components/CheckoutSteps';
@@ -15,6 +16,7 @@ import { Button, DemoTag, EmptyState, ErrorState, LinkButton, PageHeader, Skelet
 
 type Contact = { firstName: string; lastName: string; phone: string; email: string };
 type Address = { street: string; area: string; city: string; province: string; postalCode: string };
+type SavedAddress = Address & { id: string; label: string | null };
 const DRAFT_KEY = 'gv-checkout-draft';
 const emptyAddress: Address = { street: '', area: '', city: 'Johannesburg', province: 'Gauteng', postalCode: '' };
 
@@ -25,30 +27,43 @@ function loadDraft(): { contact?: Contact; address?: Address } {
 export default function Checkout() {
   const me = useMe();
   const cart = useCart();
+  const [asGuest, setAsGuest] = useState(false);
   if (me.isPending) return <Shell><Skeleton className="h-64" /></Shell>;
   if (me.isError) return <Shell><ErrorState message={me.error.message} onRetry={() => me.refetch()} /></Shell>;
   if (cart.lines.length === 0) return <Shell><EmptyState icon={ShoppingBag} title="Your cart is empty" action={<LinkButton to="/shop">Start shopping</LinkButton>}>Add products to your cart before checking out.</EmptyState></Shell>;
-  if (!me.data || me.data.role !== 'CUSTOMER')
+  if (me.data && me.data.role !== 'CUSTOMER')
+    return <Shell><EmptyState icon={LogIn} title="Checkout is for customers">You're signed in with a staff account. Sign out to order as a customer.</EmptyState></Shell>;
+  if (!me.data && !asGuest)
     return (
       <Shell>
-        <EmptyState icon={LogIn} title="Sign in to check out" action={<LinkButton to="/account?next=/checkout">Sign in or create an account</LinkButton>}>
-          {me.data ? 'Checkout is for customer accounts.' : 'Your cart is saved. Signing in lets you track your order and order again later.'}
-        </EmptyState>
+        <div className="grid max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
+          <section className="card flex flex-col gap-3 p-5">
+            <h2 className="flex items-center gap-2 text-lg font-extrabold"><LogIn className="size-5" aria-hidden /> Sign in</h2>
+            <p className="flex-1 text-ink-2">Track your order, save addresses and order again in one tap.</p>
+            <LinkButton to="/account?next=/checkout">Sign in or create an account</LinkButton>
+          </section>
+          <section className="card flex flex-col gap-3 p-5">
+            <h2 className="flex items-center gap-2 text-lg font-extrabold"><UserRound className="size-5" aria-hidden /> Check out as a guest</h2>
+            <p className="flex-1 text-ink-2">No account needed. Track your order with its number and your email.</p>
+            <Button variant="secondary" onClick={() => setAsGuest(true)}>Continue as guest</Button>
+          </section>
+        </div>
       </Shell>
     );
-  return <CheckoutFlow defaults={{ name: me.data.name, email: me.data.email, phone: me.data.phone ?? '' }} />;
+  return <CheckoutFlow guest={!me.data} defaults={{ name: me.data?.name ?? '', email: me.data?.email ?? '', phone: me.data?.phone ?? '' }} />;
 }
 
 function Shell({ children }: { children: ReactNode }) {
   return <div className="container-page"><PageHeader eyebrow="Checkout" title="Checkout" />{children}</div>;
 }
 
-function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; phone: string } }) {
+function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: string; email: string; phone: string } }) {
   const cart = useCart();
   const nav = useNavigate();
   const qc = useQueryClient();
   const products = useProducts({ store: cart.storeSlug });
   const store = useStore(cart.storeSlug);
+  useForceCollection(store.data && store.data.zones.length === 0);
   const draft = useMemo(loadDraft, []);
   const [step, setStep] = useState(0);
   const [touched, setTouched] = useState<Record<number, boolean>>({});
@@ -57,18 +72,25 @@ function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; p
     return { firstName: first, lastName: rest.join(' '), phone: defaults.phone, email: defaults.email };
   })());
   const [address, setAddress] = useState<Address>(draft.address ?? emptyAddress);
+  const [ageOk, setAgeOk] = useState(false);
+  const [saveAddress, setSaveAddress] = useState(false);
+  const saved = useQuery({ queryKey: ['addresses'], queryFn: () => api<SavedAddress[]>('/account/addresses'), enabled: !guest });
+  const pickedSaved = saved.data?.find(a => (['street', 'area', 'city', 'province', 'postalCode'] as const).every(k => a[k] === address[k]));
   useEffect(() => { try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ contact, address })); } catch { /* ignore */ } }, [contact, address]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }, [step]);
 
   const delivery = cart.fulfilment === 'DELIVERY';
   const place = useMutation({
-    mutationFn: () => api<OrderDetail>('/orders', { method: 'POST', body: {
+    mutationFn: () => api<OrderDetail & { guestToken?: string }>('/orders', { method: 'POST', body: {
       storeSlug: cart.storeSlug, fulfilment: cart.fulfilment, zoneId: delivery ? cart.zoneId : undefined,
       contact: { ...contact, firstName: contact.firstName.trim(), lastName: contact.lastName.trim(), email: contact.email.trim(), phone: contact.phone.trim() },
       address: delivery ? Object.fromEntries(Object.entries(address).map(([k, v]) => [k, v.trim()])) : undefined,
       items: cart.lines.map(l => ({ productId: l.productId, quantity: l.quantity })),
+      ...(store.data?.ageRestricted ? { ageConfirmed: ageOk } : {}),
+      ...(!guest && delivery && saveAddress && !pickedSaved ? { saveAddress: true } : {}),
     } }),
     onSuccess: order => {
+      if (order.guestToken) rememberGuestOrder({ id: order.id, orderNumber: order.orderNumber, token: order.guestToken });
       cart.clear();
       try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       qc.invalidateQueries({ queryKey: ['products'] }); qc.invalidateQueries({ queryKey: ['orders'] });
@@ -99,7 +121,8 @@ function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; p
   if (!/^\d{4}$/.test(address.postalCode.trim())) addressErrors.postalCode = 'Use a 4-digit postal code';
   const fulfilmentError = delivery && !zone ? 'Choose your delivery zone' : undefined;
 
-  const stepValid = [Object.keys(contactErrors).length === 0, !fulfilmentError, !delivery || Object.keys(addressErrors).length === 0];
+  const ageRequired = !!store.data.ageRestricted, minAge = store.data.config.ageVerification?.minimumAge ?? 18;
+  const stepValid = [Object.keys(contactErrors).length === 0 && (!ageRequired || ageOk), !fulfilmentError, !delivery || Object.keys(addressErrors).length === 0];
   const next = (e?: FormEvent) => {
     e?.preventDefault();
     setTouched(t => ({ ...t, [step]: true }));
@@ -131,8 +154,19 @@ function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; p
                 <Field id="co-first" label="First name" autoComplete="given-name" value={contact.firstName} onChange={setC('firstName')} error={err(contactErrors, 'firstName')} />
                 <Field id="co-last" label="Surname" autoComplete="family-name" value={contact.lastName} onChange={setC('lastName')} error={err(contactErrors, 'lastName')} />
                 <Field id="co-phone" label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={contact.phone} onChange={setC('phone')} error={err(contactErrors, 'phone')} hint="The store and driver use this to reach you" />
-                <Field id="co-email" label="Email" type="email" inputMode="email" autoComplete="email" value={contact.email} onChange={setC('email')} error={err(contactErrors, 'email')} />
+                <Field id="co-email" label="Email" type="email" inputMode="email" autoComplete="email" value={contact.email} onChange={setC('email')} error={err(contactErrors, 'email')} hint={guest ? 'You can track your order with your order number and this email.' : undefined} />
               </div>
+              {ageRequired && (
+                <div className="rounded-2xl bg-warn-bg p-4 text-warn-text">
+                  <p className="flex items-center gap-2 font-bold"><ShieldAlert className="size-5" aria-hidden /> Age-restricted order</p>
+                  <label className="mt-2 flex items-start gap-3 font-semibold">
+                    <input type="checkbox" className="mt-1 size-4 accent-[var(--brand)]" checked={ageOk} onChange={e => setAgeOk(e.target.checked)} aria-invalid={!!(touched[0] && !ageOk)} />
+                    I confirm I am {minAge} or older, and whoever receives this order will show ID.
+                  </label>
+                  {touched[0] && !ageOk && <p className="mt-1 text-sm">Please confirm your age to continue.</p>}
+                  {store.data.config.responsibleSaleMessage && <p className="mt-2 text-sm">{store.data.config.responsibleSaleMessage}</p>}
+                </div>
+              )}
               {nav2}
             </form>
           )}
@@ -142,13 +176,14 @@ function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; p
               <h2 id="s1" className="text-xl font-extrabold">Delivery or collection</h2>
               <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <legend className="sr-only">Fulfilment</legend>
-                {([['DELIVERY', 'Delivery', 'To your door, from the Meat Market', Truck], ['COLLECTION', 'Collect from store', 'Pick up at Green Valley · free', StoreIcon]] as const).map(([v, title, sub, Icon]) => (
+                {([['DELIVERY', 'Delivery', `To your door, from ${store.data.name.replace('Green Valley ', 'the ')}`, Truck], ['COLLECTION', 'Collect from store', 'Pick up at Green Valley · free', StoreIcon]] as const).filter(([v]) => v === 'COLLECTION' || store.data.zones.length > 0).map(([v, title, sub, Icon]) => (
                   <label key={v} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition ${cart.fulfilment === v ? 'border-brand bg-brand-soft' : 'border-line hover:border-ink-3'}`}>
                     <input type="radio" name="fulfilment" value={v} checked={cart.fulfilment === v} onChange={() => cart.setFulfilment(v)} className="mt-1 size-4 accent-[var(--brand)]" />
                     <span><span className="flex items-center gap-2 font-bold"><Icon className="size-5" aria-hidden />{title}</span><span className="text-sm text-ink-2">{sub}</span></span>
                   </label>
                 ))}
               </fieldset>
+              {store.data.zones.length === 0 && <p className="text-sm text-ink-2">{store.data.name} offers collection from the store only for now.</p>}
               {delivery && (
                 <div>
                   <label htmlFor="co-zone" className="mb-1 flex items-center gap-2 text-sm font-semibold">Delivery zone <DemoTag /></label>
@@ -166,6 +201,20 @@ function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; p
           {step === 2 && (
             <form onSubmit={next} noValidate className="space-y-5" aria-labelledby="s2">
               <h2 id="s2" className="text-xl font-extrabold">Delivery address</h2>
+              {!!saved.data?.length && (
+                <fieldset>
+                  <legend className="mb-2 text-sm font-semibold">Saved addresses</legend>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {saved.data.map(a => (
+                      <label key={a.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 text-sm transition ${pickedSaved?.id === a.id ? 'border-brand bg-brand-soft' : 'border-line hover:border-ink-3'}`}>
+                        <input type="radio" name="saved-address" value={a.id} checked={pickedSaved?.id === a.id} onChange={() => setAddress({ street: a.street, area: a.area, city: a.city, province: a.province, postalCode: a.postalCode })} className="mt-1 size-4 accent-[var(--brand)]" />
+                        <span><span className="block font-bold">{a.label || a.street}</span><span className="text-ink-2">{a.street}, {a.area}, {a.city} {a.postalCode}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                  <button type="button" className="mt-2 min-h-10 text-sm font-semibold text-brand-text hover:underline" onClick={() => setAddress(emptyAddress)}>Use a new address</button>
+                </fieldset>
+              )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field id="co-street" label="Street address" className="sm:col-span-2" autoComplete="address-line1" value={address.street} onChange={setA('street')} error={err(addressErrors, 'street')} />
                 <Field id="co-area" label="Suburb / area" autoComplete="address-level3" value={address.area} onChange={setA('area')} error={err(addressErrors, 'area')} />
@@ -178,6 +227,7 @@ function CheckoutFlow({ defaults }: { defaults: { name: string; email: string; p
                 </div>
                 <Field id="co-postal" label="Postal code" inputMode="numeric" autoComplete="postal-code" maxLength={4} value={address.postalCode} onChange={setA('postalCode')} error={err(addressErrors, 'postalCode')} />
               </div>
+              {!guest && !pickedSaved && <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" className="size-4 accent-[var(--brand)]" checked={saveAddress} onChange={e => setSaveAddress(e.target.checked)} /> Save this address for next time</label>}
               {nav2}
             </form>
           )}

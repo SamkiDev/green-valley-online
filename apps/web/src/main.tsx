@@ -13,7 +13,8 @@ import ProductPage from './pages/ProductPage';
 import Cart from './pages/Cart';
 import Account from './pages/Account';
 import Wholesale from './pages/Wholesale';
-import { About, Deals, NotFound, Track } from './pages/Info';
+import { About, Deals, NotFound } from './pages/Info';
+import TrackOrder from './pages/TrackOrder';
 import Checkout from './pages/Checkout';
 import Pay from './pages/Pay';
 import { OrderConfirmation, TrackingPage } from './pages/OrderPages';
@@ -25,7 +26,7 @@ import { Inventory, Products } from './pages/admin/Products';
 import { Customers, Drivers } from './pages/admin/People';
 import { StoresSettings } from './pages/admin/Settings';
 import { Analytics } from './pages/admin/Analytics';
-import { Questions, WholesaleRequests } from './pages/admin/Inbox';
+import { Questions, ReviewsModeration, WholesaleRequests } from './pages/admin/Inbox';
 import './index.css';
 
 const adminOnly = (el: React.ReactNode) => <RequireRole roles={['ADMIN']} title="Admin-only section">{el}</RequireRole>;
@@ -55,7 +56,7 @@ const router = createBrowserRouter([
       { path: '/orders/:id', element: <OrderConfirmation /> },
       { path: '/track/:id', element: <TrackingPage /> },
       { path: '/deals', element: <Deals /> },
-      { path: '/track', element: <Track /> },
+      { path: '/track', element: <TrackOrder /> },
       { path: '/about', element: <About /> },
       { path: '/account', element: <Account /> },
       { path: '/wholesale', element: <Wholesale /> },
@@ -76,6 +77,7 @@ const router = createBrowserRouter([
         { path: 'products', element: <Products /> },
         { path: 'inventory', element: <Inventory /> },
         { path: 'questions', element: <Questions /> },
+        { path: 'reviews', element: <ReviewsModeration /> },
         { path: 'analytics', element: <Analytics /> },
         { path: 'customers', element: adminOnly(<Customers />) },
         { path: 'drivers', element: adminOnly(<Drivers />) },
