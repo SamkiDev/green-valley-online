@@ -1,6 +1,6 @@
 // Shell for the staff-facing portals (driver, admin). No customer navigation or Vallerie here.
 // The role check below only decides what to show; the API enforces roles on every request.
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { Suspense, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Outlet, ScrollRestoration } from 'react-router';
 import { LogOut, Moon, ShieldAlert, Sun } from 'lucide-react';
 import { useAuthActions, useMe } from '../lib/auth';
@@ -32,7 +32,7 @@ export function PortalLayout({ label }: { label: string }) {
           </div>
         </div>
       </header>
-      <main id="main" className="flex-1"><Outlet /></main>
+      <main id="main" className="flex-1"><Suspense fallback={<div className="mx-auto max-w-md px-4 py-10"><Skeleton className="h-64" /></div>}><Outlet /></Suspense></main>
       <ScrollRestoration />
     </div>
   );

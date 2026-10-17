@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from 'react-router';
 import { BarChart3, Boxes, ClipboardList, LayoutDashboard, MessageSquareText, Package, Star, Store, Truck, Users, Warehouse } from 'lucide-react';
 import { useMe } from '../../lib/auth';
+import { Suspense } from 'react';
+import { Skeleton } from '../../components/ui';
 
 const SECTIONS = [
   { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -32,7 +34,7 @@ export default function AdminLayout() {
           ))}
         </ul>
       </nav>
-      <div className="min-w-0"><Outlet /></div>
+      <div className="min-w-0"><Suspense fallback={<Skeleton className="h-64" />}><Outlet /></Suspense></div>
     </div>
   );
 }

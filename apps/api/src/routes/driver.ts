@@ -40,6 +40,22 @@ driverRoutes.get('/history', h(async (_, res) => {
   res.json(list.map(d => ({ id: d.id, orderNumber: orderNo(d.order.seq), area: d.order.area, total: d.order.total, deliveredAt: d.deliveredAt })));
 }));
 
+// GPS from the driver's phone while a delivery is on the road. Throttled to one stored point every 10 seconds.
+const LOCATION_STATUSES: DeliveryStatus[] = ['OUT_FOR_DELIVERY', 'ARRIVED'];
+driverRoutes.post('/:id/location', h(async (req, res) => {
+  const b = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), accuracy: z.number().min(0).max(100_000).optional() }).parse(req.body);
+  const d = await db.delivery.findUnique({ where: { id: req.params.id }, select: { id: true, driverId: true, status: true, lastLocationAt: true } });
+  if (!d || d.driverId !== me(res).driverId) throw fail(404, 'Delivery not found');
+  if (!LOCATION_STATUSES.includes(d.status)) throw fail(409, 'Location is only shared while the delivery is on the road');
+  const now = new Date();
+  if (d.lastLocationAt && +now - +d.lastLocationAt < 10_000) return res.status(202).json({ stored: false }); // too soon; keep the last one
+  await db.$transaction([
+    db.delivery.update({ where: { id: d.id }, data: { lastLat: b.lat, lastLng: b.lng, lastAccuracy: b.accuracy ?? null, lastLocationAt: now } }),
+    db.trackingPoint.create({ data: { deliveryId: d.id, lat: b.lat, lng: b.lng, accuracy: b.accuracy } }),
+  ]);
+  res.json({ stored: true });
+}));
+
 driverRoutes.post('/:id/advance', h(async (req, res) => {
   // `from` is the status the driver saw on screen; if it changed meanwhile, nothing happens (no double advance).
   const { from } = z.object({ from: z.nativeEnum(DeliveryStatus).optional() }).parse(req.body ?? {});

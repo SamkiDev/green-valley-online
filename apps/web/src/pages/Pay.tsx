@@ -5,6 +5,7 @@ import { Navigate, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CreditCard, Landmark, Lock, PackageX, ShieldCheck } from 'lucide-react';
 import { api, ApiError, itemQty, type OrderDetail, type PayResponse } from '../lib/api';
+import { usePaymentConfig } from '../lib/queries';
 import { rand } from '../lib/format';
 import { CheckoutSteps } from '../components/CheckoutSteps';
 import { Button, EmptyState, ErrorState, LinkButton, PageHeader, Skeleton } from '../components/ui';
@@ -20,9 +21,15 @@ export default function Pay() {
   const qc = useQueryClient();
   const order = useQuery({ queryKey: ['order', orderId], queryFn: () => api<OrderDetail>(`/orders/${orderId}`) });
   const [method, setMethod] = useState<'CARD' | 'EFT'>('CARD');
+  const config = usePaymentConfig();
+  const mode = config.data?.mode ?? 'demo';
   const pay = useMutation({
     mutationFn: () => api<PayResponse>(`/payments/${orderId}/pay`, { method: 'POST', body: { method } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order', orderId] }); qc.invalidateQueries({ queryKey: ['orders'] }); nav(`/orders/${orderId}`, { replace: true }); },
+    onSuccess: r => {
+      if (r.redirectUrl) { window.location.assign(r.redirectUrl); return; } // pay on the provider's secure page, then come back to /checkout/return
+      qc.invalidateQueries({ queryKey: ['order', orderId] }); qc.invalidateQueries({ queryKey: ['orders'] });
+      nav(`/orders/${orderId}`, { replace: true });
+    },
   });
 
   if (order.isPending) return <div className="container-page"><PageHeader title="Payment" /><Skeleton className="h-72" /></div>;
@@ -41,8 +48,8 @@ export default function Pay() {
       <CheckoutSteps current={4} skipped={o.fulfilment === 'COLLECTION' ? [2] : []} />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <section className="card overflow-hidden" aria-labelledby="pay-h">
-          <div className="flex items-center gap-2 bg-warn-bg px-5 py-3 text-sm font-bold text-warn-text" role="note">
-            <ShieldCheck className="size-5 shrink-0" aria-hidden /> DEMO PAYMENT MODE · No real money is charged and no card details are collected.
+          <div className={`flex items-center gap-2 px-5 py-3 text-sm font-bold ${mode === 'live' ? 'bg-ok-bg text-ok-text' : 'bg-warn-bg text-warn-text'}`} role="note">
+            <ShieldCheck className="size-5 shrink-0" aria-hidden /> {mode === 'demo' ? 'DEMO PAYMENT MODE · No real money is charged and no card details are collected.' : mode === 'test' ? 'PAYSTACK TEST MODE · Use Paystack test cards. No real money is charged.' : 'Secure payment by Paystack.'}
           </div>
           <div className="space-y-5 p-5 sm:p-6">
             <h2 id="pay-h" className="text-xl font-extrabold">Choose how to pay</h2>
@@ -57,10 +64,10 @@ export default function Pay() {
             </fieldset>
             <p className="flex gap-2 rounded-xl bg-surface-2 p-3 text-sm text-ink-2">
               <Lock className="mt-0.5 size-4 shrink-0" aria-hidden />
-              When live payments are switched on, you'll complete {method === 'CARD' ? 'card' : 'bank'} payment on the payment provider's secure page. Green Valley Online never sees or stores your card details.
+              {mode === 'demo' ? <>When live payments are switched on, you'll complete {method === 'CARD' ? 'card' : 'bank'} payment on the payment provider's secure page.</> : <>You'll be taken to Paystack's secure page to pay, then brought back here.</>} Green Valley Online never sees or stores your card details.
             </p>
             {pay.isError && <p className="rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text" role="alert">{pay.error.message}</p>}
-            <Button size="lg" className="w-full" onClick={() => pay.mutate()} busy={pay.isPending}>Pay Now · {rand(o.total)} <span className="rounded bg-black/15 px-1.5 py-px text-xs">DEMO</span></Button>
+            <Button size="lg" className="w-full" onClick={() => pay.mutate()} busy={pay.isPending}>{mode === 'demo' ? 'Pay Now' : 'Pay with Paystack'} · {rand(o.total)} {mode !== 'live' && <span className="rounded bg-black/15 px-1.5 py-px text-xs">{mode === 'demo' ? 'DEMO' : 'TEST'}</span>}</Button>
           </div>
         </section>
         <aside className="card space-y-3 p-5" aria-label="Order summary">

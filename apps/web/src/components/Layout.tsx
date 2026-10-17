@@ -1,11 +1,13 @@
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router';
 import { Home, LayoutGrid, Menu, Moon, ShoppingBag, Store, Sun, User, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { Skeleton } from './ui';
 import { useCart } from '../lib/cart';
 import { useMe } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { firstName } from '../lib/format';
 import { Vallerie } from './Vallerie';
+import { usePaymentConfig } from '../lib/queries';
 
 const NAV = [
   { to: '/', label: 'Home', end: true },
@@ -160,14 +162,15 @@ function Footer() {
 }
 
 export function Layout() {
+  const payMode = usePaymentConfig().data?.mode;
   return (
     <div className="flex min-h-dvh flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:p-3">Skip to content</a>
       <div className="bg-panel text-on-panel-2">
-        <p className="container-page py-1.5 text-center text-xs font-medium"><span className="font-bold text-on-panel">DEMO</span> · Demo prices and simulated payments. Nothing is charged.</p>
+        <p className="container-page py-1.5 text-center text-xs font-medium"><span className="font-bold text-on-panel">DEMO</span> · {payMode === 'live' ? 'Demo prices.' : payMode === 'test' ? 'Demo prices. Payments run in Paystack test mode; nothing is charged.' : 'Demo prices and simulated payments. Nothing is charged.'}</p>
       </div>
       <Header />
-      <main id="main" className="flex-1"><Outlet /></main>
+      <main id="main" className="flex-1"><Suspense fallback={<div className="container-page py-8"><Skeleton className="h-64" /></div>}><Outlet /></Suspense></main>
       <Footer />
       <div className="h-16 lg:hidden" aria-hidden />
       <BottomNav />

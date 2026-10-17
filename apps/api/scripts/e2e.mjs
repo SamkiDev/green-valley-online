@@ -254,5 +254,55 @@ ok(r.s === 201 && r.j.ageConfirmedAt, 'age-restricted order accepted after confi
 await admin('DELETE', `/admin/products/${beer.id}`);
 await admin('PATCH', `/admin/stores/${liquor.id}`, { status: 'COMING_SOON' });
 
+// ---- Stage 6: product photos ----
+const { default: sharp } = await import('sharp');
+// A JPEG carrying GPS data in its EXIF, like a phone photo.
+const photo = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#b91c1c' } })
+  .jpeg().withExifMerge({ IFD0: { Make: 'TestPhone' }, IFD3: { GPSLatitudeRef: 'S', GPSLatitude: '26/1 10/1 0/1' } }).toBuffer();
+ok(!!(await sharp(photo).metadata()).exif, 'test photo starts with EXIF metadata');
+const adminCookie = (await fetch(BASE + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'admin@demo.local', password: 'demo-password-1' }) })).headers.get('set-cookie').split(';')[0];
+const uploadAs = async (path, files, field) => {
+  const fd = new FormData(); for (const [name, bytes, type] of files) fd.append(field, new Blob([bytes], { type }), name);
+  const r = await fetch(BASE + path, { method: 'POST', headers: { Cookie: adminCookie }, body: fd }); return { s: r.status, j: await r.json() };
+};
+r = await uploadAs(`/admin/products/${P('Beef Brisket').id}/image`, [['brisket.jpg', photo, 'image/jpeg']], 'image');
+ok(r.s === 200 && /^\/uploads\/products\/.+\.webp$/.test(r.j.imageUrl), 'upload a product photo', r.j.imageUrl);
+const img = await fetch('http://localhost:4000' + r.j.imageUrl);
+const imgBytes = Buffer.from(await img.arrayBuffer()); const imgMeta = await sharp(imgBytes).metadata();
+ok(img.ok && imgMeta.format === 'webp' && imgMeta.width <= 1200 && !imgMeta.exif, 'photo served as WebP, resized, metadata stripped', `${imgMeta.width}x${imgMeta.height} exif=${!!imgMeta.exif}`);
+ok((await anon('GET', `/products/${P('Beef Brisket').id}`)).j.imageUrl === r.j.imageUrl, 'product shows the new photo');
+r = await uploadAs(`/admin/products/${P('Beef Brisket').id}/image`, [['notes.txt', Buffer.from('not an image'), 'text/plain']], 'image');
+ok(r.s === 400, 'non-image upload rejected', r.j.error);
+r = await uploadAs('/admin/products/images/bulk', [['Beef Mince.jpg', photo, 'image/jpeg'], ['CHICKEN_WINGS.jpg', photo, 'image/jpeg'], ['mystery-meat.jpg', photo, 'image/jpeg']], 'images');
+ok(r.s === 200 && r.j.matched === 2 && r.j.results.find(x => x.file === 'mystery-meat.jpg')?.ok === false, 'bulk upload matches photos by product name', r.j.results.map(x => `${x.file}:${x.ok ? x.product : x.error}`).join(', '));
+ok((await fetch(BASE + `/admin/products/${P('Beef Brisket').id}/image`, { method: 'POST' })).status === 401, 'photo upload needs staff sign-in');
+
+// ---- Stage 6: payments config ----
+r = await anon('GET', '/payments/config');
+ok(r.s === 200 && r.j.provider === 'demo' && r.j.mode === 'demo', 'payment provider config', JSON.stringify(r.j));
+
+// ---- Stage 6: GPS ----
+const gps = await placeAndPay('DELIVERY', [{ productId: P('Pork Chops').id, quantity: 1 }]);
+let gDel = (await drv('GET', '/deliveries/mine')).j.find(d => d.orderId === gps.id);
+r = await drv('POST', `/deliveries/${gDel.id}/location`, { lat: -26.1, lng: 28.0 });
+ok(r.s === 404 || r.s === 409, 'no location before the driver has the delivery', String(r.s));
+await drv('POST', `/deliveries/${gDel.id}/advance`, { from: 'PENDING' });
+r = await drv('POST', `/deliveries/${gDel.id}/location`, { lat: -26.1, lng: 28.0 });
+ok(r.s === 409, 'no location sharing before the driver leaves');
+await drv('POST', `/deliveries/${gDel.id}/advance`, { from: 'ASSIGNED' });
+ok((await cust('GET', `/orders/${gps.id}/tracking`)).j.driverLocation === null, 'no map position until the driver shares one');
+r = await drv('POST', `/deliveries/${gDel.id}/location`, { lat: -26.1050, lng: 28.0560, accuracy: 12 });
+ok(r.s === 200 && r.j.stored, 'driver shares location while out for delivery');
+r = await drv('POST', `/deliveries/${gDel.id}/location`, { lat: -26.1060, lng: 28.0570 });
+ok(r.s === 202 && !r.j.stored, 'location updates are throttled (10 s)');
+ok((await drv('POST', `/deliveries/${gDel.id}/location`, { lat: 123, lng: 28 })).s === 400, 'impossible coordinates rejected');
+let t6 = (await cust('GET', `/orders/${gps.id}/tracking`)).j;
+ok(t6.driverLocation?.lat === -26.105 && t6.simulated === false, 'customer tracking shows the driver position', JSON.stringify(t6.driverLocation));
+ok((await newbie('GET', `/orders/${gps.id}/tracking`)).s === 404, "other customers can't see the driver position");
+await drv('POST', `/deliveries/${gDel.id}/advance`, { from: 'OUT_FOR_DELIVERY' });
+await drv('POST', `/deliveries/${gDel.id}/advance`, { from: 'ARRIVED' });
+t6 = (await cust('GET', `/orders/${gps.id}/tracking`)).j;
+ok(t6.status === 'DELIVERED' && t6.driverLocation === null, 'position hidden once delivered');
+
 console.log(`\n${pass} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

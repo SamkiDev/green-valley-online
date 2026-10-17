@@ -6,6 +6,8 @@ import { dateTime, rand, time, windowLabel } from '../lib/format';
 import { Badge, DemoTag, EmptyState, ErrorState, LinkButton, Skeleton } from '../components/ui';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { ReorderButton } from '../components/ReorderButton';
+import { lazy, Suspense } from 'react';
+const DriverMap = lazy(() => import('../components/DriverMap').then(m => ({ default: m.DriverMap }))); // Leaflet loads only when there is a map to show
 
 function NotFoundOrError({ error, retry }: { error: Error; retry: () => void }) {
   if (error instanceof ApiError && (error.status === 404 || error.status === 401 || error.status === 403))
@@ -116,6 +118,8 @@ export function TrackingPage() {
         </div>
       )}
 
+      {t.driverLocation && <div className="mt-5"><Suspense fallback={<Skeleton className="h-72" />}><DriverMap location={t.driverLocation} /></Suspense></div>}
+
       {t.payment !== 'PAID' && t.status !== 'CANCELLED' && (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-warn-bg p-4 text-warn-text">
           <p className="font-semibold">This order hasn't been paid yet.</p>
@@ -154,7 +158,7 @@ export function TrackingPage() {
           )}
           <div className="card p-5">
             <p className="flex items-center gap-2 font-extrabold"><MapPin className="size-5 text-ink-3" aria-hidden /> {t.fulfilment === 'DELIVERY' ? 'Delivery' : 'Collection'}</p>
-            <p className="mt-1 text-sm text-ink-2">Tracking is simulated in this demo: the driver updates each step from the driver portal. Live map tracking comes later.</p>
+            <p className="mt-1 text-sm text-ink-2">{t.driverLocation ? 'Your driver is sharing their location while on the road. It stops when your order is delivered.' : t.fulfilment === 'DELIVERY' ? 'Each step is updated by the store and your driver. A live map appears here while your driver is on the way and sharing their location.' : 'Each step is updated by the store.'}</p>
             <p className="mt-2 text-xs text-ink-3">Last checked {time(new Date(q.dataUpdatedAt).toISOString())}</p>
           </div>
           <WhatsAppButton number={store.data?.config.whatsapp} label="Need help?" message={`Hi, I have a question about order #${t.orderNumber}.`} className="w-full" />

@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { db, fail, h, me, need, num, orderNo, saPhone, scope, setOrderStatus } from '../core';
+import { imageRoutes } from './images';
 
 export const adminRoutes = express.Router();
 adminRoutes.use(need('ADMIN', 'STORE_STAFF'));
@@ -228,4 +229,5 @@ A.put('/zones/:id', h(async (req, res) => {
 
 A.get('/wholesale', h(async (_, res) => res.json(await db.wholesaleRequest.findMany({ orderBy: { createdAt: 'desc' } }))));
 
+adminRoutes.use(imageRoutes); // product photos (admin and store staff)
 adminRoutes.use(A);

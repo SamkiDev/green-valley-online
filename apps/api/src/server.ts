@@ -10,16 +10,20 @@ import { orderRoutes, paymentRoutes } from './routes/orders';
 import { accountRoutes } from './routes/account';
 import { reviewRoutes } from './routes/reviews';
 import { askVallerie, mentionedProducts } from './ai';
+import { UPLOAD_ROOT, UPLOAD_URL } from './storage';
 
 const SECRET = process.env.JWT_SECRET; if (!SECRET || SECRET.length < 24) throw new Error('Set a long JWT_SECRET in .env');
 const app = express();
 app.set('trust proxy', 'loopback'); // the Vite dev proxy forwards from localhost; needed for per-client rate limits
-app.use(helmet(), express.json({ limit: '50kb' }), cookieParser());
+// rawBody is kept for webhook signature checks (Paystack signs the exact bytes it sends).
+app.use(helmet(), express.json({ limit: '50kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } }), cookieParser());
 app.use((req, res, next) => { // minimal CORS for the Vite frontend, with credentials
   const o = process.env.WEB_ORIGIN; if (o && req.headers.origin === o) { res.set({ 'Access-Control-Allow-Origin': o, 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Allow-Headers': 'Content-Type, X-Order-Token', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE' }); }
   req.method === 'OPTIONS' ? res.sendStatus(204) : next();
 });
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 200 }));
+// Uploaded product photos. File names are random UUIDs, so they can be cached for a long time.
+app.use(UPLOAD_URL, express.static(UPLOAD_ROOT, { maxAge: '30d', immutable: true, index: false, fallthrough: false }));
 
 // ---- auth: role is ALWAYS loaded from the DB, never trusted from the client or token claims ----
 async function load(req: Request, res: Response, next: NextFunction) {
@@ -115,4 +119,7 @@ app.use((e: any, _: Request, res: Response, __: NextFunction) => {
   if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return res.status(409).json({ error: 'Already exists' });
   console.error(e); res.status(500).json({ error: 'Something went wrong' });
 });
+// GPS history is kept for 30 days, then deleted.
+const purgeTracking = () => db.trackingPoint.deleteMany({ where: { at: { lt: new Date(Date.now() - 30 * 864e5) } } }).catch(e => console.error('Tracking purge failed', e));
+purgeTracking(); setInterval(purgeTracking, 864e5).unref();
 app.listen(+(process.env.PORT || 4000), () => console.log('Green Valley API on :' + (process.env.PORT || 4000)));

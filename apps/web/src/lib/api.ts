@@ -42,12 +42,12 @@ export type OrderDetail = {
 export type Tracking = {
   orderId: string; orderNumber: string; status: string; fulfilment: 'DELIVERY' | 'COLLECTION'; payment: string;
   steps: { key: string; label: string; at: string | null }[]; current: string; message: string | null;
-  estimatedWindow: Window; deliveryStatus: string | null; simulated: boolean;
+  estimatedWindow: Window; deliveryStatus: string | null; simulated: boolean; driverLocation: DriverLocation;
 };
 export type ChatMsg = { role: 'user' | 'assistant'; content: string };
 export type ChatProduct = Pick<Product, 'id' | 'name' | 'price' | 'soldByWeight' | 'category' | 'imageUrl' | 'inventory'>;
 export type ChatResponse = { reply: string; products?: ChatProduct[]; error?: string };
-export type PayResponse = { paymentId: string; providerRef: string; orderId: string; orderNumber: string; status: 'PAID' | 'FAILED'; demo: boolean };
+export type PayResponse = { paymentId: string; providerRef?: string; orderId: string; orderNumber: string; status: 'PAID' | 'FAILED' | 'PENDING'; demo?: boolean; redirectUrl?: string; mode: PaymentConfig['mode'] };
 
 export const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
 export const isSaPhone = (v: string) => /^(\+27|0)\d{9}$/.test(v.replace(/[\s-]/g, ''));
@@ -100,3 +100,16 @@ export function stockState(p: Pick<Product, 'inventory'>): StockState {
   return q <= 0 ? 'OUT_OF_STOCK' : q <= low ? 'LOW_STOCK' : 'IN_STOCK';
 }
 export const available = (p: Pick<Product, 'inventory'>) => Number(p.inventory?.quantity ?? 0);
+
+/** Multipart upload (product photos). Same error handling as api(). */
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  let res: Response;
+  try { res = await fetch('/api' + path, { method: 'POST', body: form, credentials: 'same-origin' }); }
+  catch { throw new ApiError(0, NETWORK_ERROR); }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, data?.error || `Upload failed (${res.status})`, data?.details);
+  return data as T;
+}
+
+export type PaymentConfig = { provider: 'demo' | 'paystack'; mode: 'demo' | 'test' | 'live' };
+export type DriverLocation = { lat: number; lng: number; accuracy: number | null; at: string; stale: boolean } | null;

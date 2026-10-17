@@ -7,6 +7,7 @@ import { api, ApiError } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { dateTime, firstName, rand, time } from '../../lib/format';
 import { Badge, Button, EmptyState, ErrorState, Skeleton } from '../../components/ui';
+import { LocationSharing } from './LocationSharing';
 
 type DStatus = 'PENDING' | 'READY_FOR_PICKUP' | 'ASSIGNED' | 'OUT_FOR_DELIVERY' | 'ARRIVED' | 'DELIVERED';
 type Delivery = {
@@ -56,6 +57,7 @@ function Lists({ list, refreshing, onRefresh }: { list: Delivery[]; refreshing: 
   return (
     <div className="space-y-8">
       <div className="flex justify-end"><Button variant="ghost" size="sm" onClick={onRefresh} busy={refreshing}><RotateCcw className="size-4" aria-hidden /> Refresh</Button></div>
+      <LocationSharing deliveryIds={active.filter(d => d.status === 'OUT_FOR_DELIVERY' || d.status === 'ARRIVED').map(d => d.id)} />
       <Section title="My deliveries" empty="No active deliveries. Accept one below when it's ready.">{active.map(d => <DeliveryCard key={d.id} d={d} />)}</Section>
       <Section title="Available to accept" empty="No unassigned deliveries right now.">{available.map(d => <DeliveryCard key={d.id} d={d} />)}</Section>
       {done.length > 0 && (

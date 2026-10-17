@@ -56,8 +56,11 @@ function tracking(o: TrackOrder) {
   const message = o.status === 'CANCELLED' ? 'This order was cancelled.'
     : d?.status === 'DELIVERED' ? 'Order delivered.' : d?.status === 'ARRIVED' ? 'Your driver has arrived.'
     : d?.status === 'OUT_FOR_DELIVERY' ? 'Your order is on the way.' : null;
+  // The driver's position is shared only while the order is on the road, never before or after.
+  const onRoad = !!d && (d.status === 'OUT_FOR_DELIVERY' || d.status === 'ARRIVED') && d.lastLat != null && d.lastLng != null && !!d.lastLocationAt;
+  const driverLocation = onRoad ? { lat: d!.lastLat!, lng: d!.lastLng!, accuracy: d!.lastAccuracy, at: d!.lastLocationAt!, stale: Date.now() - +d!.lastLocationAt! > 5 * 60_000 } : null;
   return { orderId: o.id, orderNumber: orderNo(o.seq), status: o.status, fulfilment: o.fulfilment, payment: o.payment?.status ?? 'PENDING',
-    steps, current: steps[current].key, message, estimatedWindow: deliveryWindow(o), deliveryStatus: d?.status ?? null, simulated: true };
+    steps, current: steps[current].key, message, estimatedWindow: deliveryWindow(o), deliveryStatus: d?.status ?? null, driverLocation, simulated: !driverLocation };
 }
 
 const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
@@ -161,24 +164,69 @@ orderRoutes.post('/:id/reorder', need('CUSTOMER'), h(async (req, res) => {
   }) });
 }));
 
-// ---- payments (DEMO provider behind an interface) ----
+// ---- payments: a PaymentProvider (demo or Paystack). Card details never reach this server. ----
 export const paymentRoutes = express.Router();
+
+// Marks a payment paid exactly once, then moves the order on. Safe to call from both the return page and the webhook.
+async function markPaid(paymentId: string, actorUserId?: string) {
+  await db.$transaction(async tx => {
+    const r = await tx.payment.updateMany({ where: { id: paymentId, status: { not: 'PAID' } }, data: { status: 'PAID' } });
+    if (!r.count) return; // already paid
+    const p = await tx.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { order: true } });
+    if (p.order.status !== 'PLACED') return; // e.g. cancelled meanwhile: staff see a paid payment on a cancelled order and refund it
+    await setOrderStatus(tx, p.orderId, 'PAID', actorUserId);
+    await setOrderStatus(tx, p.orderId, 'PREPARING');
+    if (p.order.fulfilment === 'DELIVERY') await tx.delivery.upsert({ where: { orderId: p.orderId }, update: {}, create: { orderId: p.orderId, updates: { create: { status: 'PENDING' } } } });
+  });
+}
+const cents = (d: Prisma.Decimal) => Math.round(num(d) * 100);
+// Accept a provider's "paid" only if it is for exactly this order's amount in rand.
+const amountOk = (v: { amountCents?: number; currency?: string }, total: Prisma.Decimal) => v.amountCents === cents(total) && (v.currency ?? 'ZAR') === 'ZAR';
+
+paymentRoutes.get('/config', (_, res) => res.json({ provider: provider.name, mode: provider.mode }));
+
 paymentRoutes.post('/:orderId/pay', h(async (req, res) => {
   const { method } = z.object({ method: z.enum(['CARD', 'EFT']) }).parse(req.body); // no card fields are accepted at all
   const o = await db.order.findFirst({ where: access(req, res, req.params.orderId), include: { payment: true } });
   if (!o) throw fail(404, 'Order not found');
   if (o.payment?.status === 'PAID') throw fail(409, 'Already paid');
   if (o.status === 'CANCELLED') throw fail(409, 'This order was cancelled');
-  const r = await provider.charge({ orderId: o.id, amount: num(o.total), method });
-  const actor = user(res)?.id;
-  const out = await db.$transaction(async tx => {
-    const pay = await tx.payment.upsert({ where: { orderId: o.id }, update: { status: r.status, providerRef: r.providerRef, method }, create: { orderId: o.id, provider: provider.name, providerRef: r.providerRef, method, status: r.status, amount: o.total } });
-    if (r.status === 'PAID') {
-      await setOrderStatus(tx, o.id, 'PAID', actor);
-      await setOrderStatus(tx, o.id, 'PREPARING');
-      if (o.fulfilment === 'DELIVERY') await tx.delivery.upsert({ where: { orderId: o.id }, update: {}, create: { orderId: o.id, updates: { create: { status: 'PENDING' } } } });
-    }
-    return pay;
+  const reference = `${orderNo(o.seq)}-${crypto.randomBytes(3).toString('hex')}`; // new reference per attempt
+  const pay = await db.payment.upsert({
+    where: { orderId: o.id },
+    update: { status: 'PENDING', provider: provider.name, providerRef: reference, method, amount: o.total },
+    create: { orderId: o.id, provider: provider.name, providerRef: reference, method, status: 'PENDING', amount: o.total },
   });
-  res.json({ paymentId: out.id, providerRef: out.providerRef, orderId: o.id, orderNumber: orderNo(o.seq), status: out.status, demo: provider.name === 'demo' });
+  const r = await provider.start({ orderId: o.id, reference, amountCents: cents(o.total), email: o.contactEmail ?? 'customer@example.invalid', method,
+    returnUrl: `${process.env.WEB_ORIGIN || 'http://localhost:5180'}/checkout/return?orderId=${o.id}` });
+  if (r.kind === 'redirect') return res.json({ paymentId: pay.id, orderId: o.id, orderNumber: orderNo(o.seq), status: 'PENDING', redirectUrl: r.url, mode: provider.mode });
+  if (r.status === 'PAID') await markPaid(pay.id, user(res)?.id);
+  else await db.payment.update({ where: { id: pay.id }, data: { status: 'FAILED' } });
+  res.json({ paymentId: pay.id, providerRef: reference, orderId: o.id, orderNumber: orderNo(o.seq), status: r.status, demo: provider.mode === 'demo', mode: provider.mode });
+}));
+
+// Called by the return page after the customer comes back from the provider. The provider is asked directly;
+// nothing in the return URL is trusted.
+paymentRoutes.post('/:orderId/verify', h(async (req, res) => {
+  const o = await db.order.findFirst({ where: access(req, res, req.params.orderId), include: { payment: true } });
+  if (!o?.payment) throw fail(404, 'Payment not found');
+  const p = o.payment;
+  if (p.status === 'PAID') return res.json({ status: 'PAID', orderId: o.id });
+  if (!provider.verify || p.provider !== provider.name || !p.providerRef) throw fail(409, 'This payment cannot be verified');
+  const v = await provider.verify(p.providerRef);
+  if (v.status === 'PAID' && amountOk(v, o.total)) { await markPaid(p.id, user(res)?.id); return res.json({ status: 'PAID', orderId: o.id }); }
+  if (v.status === 'PAID') { console.error('Payment amount mismatch', p.providerRef, v); await db.payment.update({ where: { id: p.id }, data: { status: 'FAILED' } }); return res.json({ status: 'FAILED', orderId: o.id, reason: 'amount' }); }
+  if (v.status === 'FAILED') await db.payment.update({ where: { id: p.id }, data: { status: 'FAILED' } });
+  res.json({ status: v.status, orderId: o.id });
+}));
+
+// Paystack server-to-server notification (needs a public URL in production). Signature-checked over the raw body.
+paymentRoutes.post('/webhooks/paystack', h(async (req, res) => {
+  if (provider.name !== 'paystack' || !provider.webhookValid?.((req as any).rawBody ?? Buffer.alloc(0), req.get('x-paystack-signature'))) return res.status(401).json({ error: 'Invalid signature' });
+  const evt = req.body as { event?: string; data?: { reference?: string; amount?: number; currency?: string } };
+  if (evt.event === 'charge.success' && evt.data?.reference) {
+    const p = await db.payment.findFirst({ where: { providerRef: evt.data.reference, provider: 'paystack' }, include: { order: true } });
+    if (p && amountOk({ amountCents: evt.data.amount, currency: evt.data.currency }, p.order.total)) await markPaid(p.id);
+  }
+  res.json({ ok: true }); // acknowledge so Paystack stops retrying
 }));

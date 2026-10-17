@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { lazy, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,23 +11,34 @@ import StorePage from './pages/StorePage';
 import Shop from './pages/Shop';
 import ProductPage from './pages/ProductPage';
 import Cart from './pages/Cart';
-import Account from './pages/Account';
-import Wholesale from './pages/Wholesale';
 import { About, Deals, NotFound } from './pages/Info';
-import TrackOrder from './pages/TrackOrder';
-import Checkout from './pages/Checkout';
-import Pay from './pages/Pay';
-import { OrderConfirmation, TrackingPage } from './pages/OrderPages';
 import { PortalLayout, RequireRole } from './components/Portal';
-import DriverPortal from './pages/driver/DriverPortal';
-import AdminLayout from './pages/admin/AdminLayout';
-import { Orders, Overview } from './pages/admin/Orders';
-import { Inventory, Products } from './pages/admin/Products';
-import { Customers, Drivers } from './pages/admin/People';
-import { StoresSettings } from './pages/admin/Settings';
-import { Analytics } from './pages/admin/Analytics';
-import { Questions, ReviewsModeration, WholesaleRequests } from './pages/admin/Inbox';
 import './index.css';
+
+// Staff portals load on demand so shoppers don't download them.
+const named = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then(mod => ({ default: mod[name] })));
+// Checkout, account and order pages load when first visited.
+const Account = lazy(() => import('./pages/Account'));
+const Wholesale = lazy(() => import('./pages/Wholesale'));
+const TrackOrder = lazy(() => import('./pages/TrackOrder'));
+const Checkout = lazy(() => import('./pages/Checkout'));
+const Pay = lazy(() => import('./pages/Pay'));
+const PaymentReturn = lazy(() => import('./pages/PaymentReturn'));
+const OrderConfirmation = named(() => import('./pages/OrderPages'), 'OrderConfirmation');
+const TrackingPage = named(() => import('./pages/OrderPages'), 'TrackingPage');
+const DriverPortal = lazy(() => import('./pages/driver/DriverPortal'));
+const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));
+const Overview = named(() => import('./pages/admin/Orders'), 'Overview');
+const Orders = named(() => import('./pages/admin/Orders'), 'Orders');
+const Products = named(() => import('./pages/admin/Products'), 'Products');
+const Inventory = named(() => import('./pages/admin/Products'), 'Inventory');
+const Customers = named(() => import('./pages/admin/People'), 'Customers');
+const Drivers = named(() => import('./pages/admin/People'), 'Drivers');
+const StoresSettings = named(() => import('./pages/admin/Settings'), 'StoresSettings');
+const Analytics = named(() => import('./pages/admin/Analytics'), 'Analytics');
+const Questions = named(() => import('./pages/admin/Inbox'), 'Questions');
+const ReviewsModeration = named(() => import('./pages/admin/Inbox'), 'ReviewsModeration');
+const WholesaleRequests = named(() => import('./pages/admin/Inbox'), 'WholesaleRequests');
 
 const adminOnly = (el: React.ReactNode) => <RequireRole roles={['ADMIN']} title="Admin-only section">{el}</RequireRole>;
 
@@ -53,6 +64,7 @@ const router = createBrowserRouter([
       { path: '/cart', element: <Cart /> },
       { path: '/checkout', element: <Checkout /> },
       { path: '/checkout/pay/:orderId', element: <Pay /> },
+      { path: '/checkout/return', element: <PaymentReturn /> },
       { path: '/orders/:id', element: <OrderConfirmation /> },
       { path: '/track/:id', element: <TrackingPage /> },
       { path: '/deals', element: <Deals /> },
