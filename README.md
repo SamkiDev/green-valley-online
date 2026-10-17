@@ -65,7 +65,12 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 
 **To switch Vallerie on:** put your key in `apps/api/.env` yourself (`ANTHROPIC_API_KEY=...`, or `AI_PROVIDER=xai` with `XAI_API_KEY` and `XAI_MODEL`) and restart the API. Never commit it; `.env` is git-ignored.
 
-## API (Stage 1)
+## Portals
+
+- **Driver** `/driver`: sign in as a driver. Today's deliveries with ACCEPT DELIVERY, START DELIVERY, ARRIVED, DELIVERED (DELIVERED asks for a second tap). Each action sends the status the driver saw, so a double tap can't skip a step; the customer's tracking page updates within seconds.
+- **Admin** `/admin`: sign in as admin or store staff. Staff only see their own store and can't open customers, drivers, store settings or bulk quotes. Cancelling an order returns its stock and marks a demo payment refunded. Opening a store online is a button in *Stores & settings*.
+
+## API
 
 | Area | Routes |
 |---|---|
@@ -82,6 +87,6 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 1. ✅ API running; end-to-end flow tested (register → order → demo pay → driver advance → tracking → AI fallback)
 2. ✅ `apps/web`: home, stores, shop, product, cart
 3. ✅ Checkout (details → delivery or collection → address → review), DEMO payment, confirmation, live tracking (polls every 8 s), Vallerie widget
-4. Driver portal and admin dashboard
+4. ✅ Driver portal (`/driver`) and admin dashboard (`/admin`): orders, driver assignment, products, inventory, Q&A, analytics; admin-only customers, drivers, stores & settings, bulk quotes
 5. Account, reviews, Q&A, bulk, guest checkout, liquor age verification
 6. Image storage, real payment provider, GPS tracking
