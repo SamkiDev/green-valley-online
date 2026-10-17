@@ -12,6 +12,10 @@ export const unitLabel = (soldByWeight: boolean) => (soldByWeight ? '/kg' : ' ea
 
 export function firstName(name: string) { return name.trim().split(/\s+/)[0] ?? name; }
 
+export const dateTime = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+export const time = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+export const windowLabel = (w: { from: string; to: string }) => `${time(w.from)} – ${time(w.to)}`;
+
 // Accepts "under R300", "below 300", "<300" inside a search string and returns the cleaned text + price cap.
 export function parseSearch(raw: string): { text: string; max?: number } {
   const m = raw.match(/(?:under|below|less than|<)\s*r?\s*(\d+(?:[.,]\d+)?)/i);

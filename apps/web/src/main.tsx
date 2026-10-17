@@ -13,7 +13,10 @@ import ProductPage from './pages/ProductPage';
 import Cart from './pages/Cart';
 import Account from './pages/Account';
 import Wholesale from './pages/Wholesale';
-import { About, CheckoutNext, Deals, NotFound, Track } from './pages/Info';
+import { About, Deals, NotFound, Track } from './pages/Info';
+import Checkout from './pages/Checkout';
+import Pay from './pages/Pay';
+import { OrderConfirmation, TrackingPage } from './pages/OrderPages';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -36,7 +39,10 @@ const router = createBrowserRouter([
       { path: '/stores/:slug', element: <StorePage /> },
       { path: '/product/:id', element: <ProductPage /> },
       { path: '/cart', element: <Cart /> },
-      { path: '/checkout', element: <CheckoutNext /> },
+      { path: '/checkout', element: <Checkout /> },
+      { path: '/checkout/pay/:orderId', element: <Pay /> },
+      { path: '/orders/:id', element: <OrderConfirmation /> },
+      { path: '/track/:id', element: <TrackingPage /> },
       { path: '/deals', element: <Deals /> },
       { path: '/track', element: <Track /> },
       { path: '/about', element: <About /> },
