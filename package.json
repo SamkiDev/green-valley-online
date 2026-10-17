@@ -8,6 +8,8 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build:web": "npm run build -w apps/web",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }
