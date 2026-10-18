@@ -53,7 +53,7 @@ try {
     return { s: r.status, j: await r.json().catch(() => null) };
   };
   ok((await call('GET', '/payments/config')).j?.mode === 'test', 'provider reports Paystack test mode');
-  await call('POST', '/auth/register', { email: `paystack-${Date.now()}@demo.local`, password: 'test-password-1', name: 'Paystack Tester' });
+  await call('POST', '/auth/register', { email: `paystack-${Date.now()}@demo.local`, password: 'test-password-1', name: 'Paystack Tester', acceptPrivacy: true });
   const store = (await call('GET', '/stores/meat-market')).j;
   const prod = (await call('GET', '/products?q=braai%20pack')).j.find(p => p.name === 'Braai Pack');
   const order = async () => (await call('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: store.zones[0].id,

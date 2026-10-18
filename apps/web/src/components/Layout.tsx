@@ -149,6 +149,8 @@ function Footer() {
           <Link className="hover:text-ink" to="/track">Track Order</Link>
           <Link className="hover:text-ink" to="/about">About</Link>
           <Link className="hover:text-ink" to="/account">Account</Link>
+          <Link className="hover:text-ink" to="/privacy">Privacy policy</Link>
+          <Link className="hover:text-ink" to="/terms">Terms of sale</Link>
         </nav>
       </div>
       <div className="border-t border-line">

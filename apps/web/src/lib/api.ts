@@ -18,7 +18,7 @@ export type Store = {
   id: string; slug: string; name: string; category: string; description: string | null;
   status: 'ACTIVE' | 'COMING_SOON' | string; ageRestricted: boolean; config: StoreConfig;
 };
-export type Zone = { id: string; name: string; fee: string };
+export type Zone = { id: string; name: string; fee: string; suburbs?: string[] };
 export type StoreDetail = Store & { zones: Zone[] };
 export type Category = { id: string; name: string };
 export type Product = {
@@ -28,7 +28,7 @@ export type Product = {
   store?: { slug: string; name: string; ageRestricted: boolean; config?: StoreConfig };
 };
 export type QA = { id: string; text: string; createdAt: string; answers: { text: string }[] };
-export type Me = { id: string; name: string; role: 'CUSTOMER' | 'STORE_STAFF' | 'DRIVER' | 'ADMIN'; email: string; phone: string | null } | null;
+export type Me = { id: string; name: string; role: 'CUSTOMER' | 'STORE_STAFF' | 'DRIVER' | 'ADMIN'; email: string; phone: string | null; mustChangePassword?: boolean } | null;
 export type OrderItem = { id: string; productId: string; nameSnapshot: string; unitPrice: string; quantity: string; lineTotal: string; product: { soldByWeight: boolean } };
 export const itemQty = (i: OrderItem) => (i.product.soldByWeight ? `${Number(i.quantity)} kg` : `× ${Number(i.quantity)}`);
 export type Window = { from: string; to: string; demo: boolean } | null;
@@ -46,7 +46,7 @@ export type Tracking = {
 };
 export type ChatMsg = { role: 'user' | 'assistant'; content: string };
 export type ChatProduct = Pick<Product, 'id' | 'name' | 'price' | 'soldByWeight' | 'category' | 'imageUrl' | 'inventory'>;
-export type ChatResponse = { reply: string; products?: ChatProduct[]; error?: string };
+export type ChatResponse = { reply: string; products?: ChatProduct[]; error?: string; mode?: 'ai' | 'basic' };
 export type PayResponse = { paymentId: string; providerRef?: string; orderId: string; orderNumber: string; status: 'PAID' | 'FAILED' | 'PENDING'; demo?: boolean; redirectUrl?: string; mode: PaymentConfig['mode'] };
 
 export const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
@@ -111,5 +111,5 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   return data as T;
 }
 
-export type PaymentConfig = { provider: 'demo' | 'paystack'; mode: 'demo' | 'test' | 'live' };
+export type PaymentConfig = { provider: 'demo' | 'paystack'; mode: 'demo' | 'test' | 'live'; unpaidMinutes?: number };
 export type DriverLocation = { lat: number; lng: number; accuracy: number | null; at: string; stale: boolean } | null;
