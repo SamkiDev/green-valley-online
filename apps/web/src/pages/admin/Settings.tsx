@@ -1,11 +1,11 @@
-// Stores & settings: activating a store, WhatsApp number, hours, delivery estimate and zone fees are data, not code.
+// Stores & settings: activating a store, WhatsApp number, hours, delivery estimate and delivery zones are data, not code.
 import { useState, type FormEvent } from 'react';
-import { Store as StoreIcon } from 'lucide-react';
+import { Plus, Store as StoreIcon } from 'lucide-react';
 import { api, ApiError, isSaPhone } from '../../lib/api';
 import { Field, TextArea } from '../../components/Field';
 import { Badge, Button, DemoTag, EmptyState, ErrorState, Skeleton } from '../../components/ui';
 import { AdminHeader } from './AdminLayout';
-import { useAdmin, useAdminMutation, type AdminStore } from './adminApi';
+import { useAdmin, useAdminMutation, type AdminStore, type Zone } from './adminApi';
 
 export function StoresSettings() {
   const q = useAdmin<AdminStore[]>('/stores');
@@ -74,30 +74,52 @@ function StoreCard({ s }: { s: AdminStore }) {
           <Button type="submit" busy={save.isPending}>Save settings</Button>
         </div>
       </form>
-      {s.zones.length > 0 && (
-        <div className="border-t border-line p-5">
-          <h3 className="mb-3 flex items-center gap-2 font-extrabold">Delivery zones <DemoTag>DEMO FEES</DemoTag></h3>
-          <ul className="space-y-2">{s.zones.map(z => <ZoneRow key={z.id} z={z} />)}</ul>
-        </div>
-      )}
+      <div className="border-t border-line p-5">
+        <h3 className="flex items-center gap-2 font-extrabold">Delivery zones <DemoTag>DEMO FEES</DemoTag></h3>
+        <p className="mb-3 text-sm text-ink-2">List the suburbs each zone covers. Checkout then picks the zone from the customer's suburb, and addresses outside every list are refused. Leave all lists empty to let customers choose a zone themselves.</p>
+        <ul className="space-y-3">{s.zones.map(z => <ZoneEditor key={z.id} storeId={s.id} z={z} />)}</ul>
+        <ZoneEditor storeId={s.id} />
+      </div>
     </section>
   );
 }
 
-function ZoneRow({ z }: { z: AdminStore['zones'][number] }) {
-  const [fee, setFee] = useState(String(Number(z.fee)));
-  const save = useAdminMutation(() => api(`/admin/zones/${z.id}`, { method: 'PUT', body: { fee: Number(fee) } }));
-  const valid = fee !== '' && Number(fee) >= 0 && Number(fee) <= 5000;
-  const id = `zone-${z.id}`;
+const splitSuburbs = (t: string) => t.split(/[,;\n]/).map(x => x.trim()).filter(Boolean);
+
+// One zone (or a blank "add zone" form when z is missing): name, fee, suburbs, on/off.
+function ZoneEditor({ storeId, z }: { storeId: string; z?: Zone }) {
+  const initial = { name: z?.name ?? '', fee: z ? String(Number(z.fee)) : '', suburbs: (z?.suburbs ?? []).join(', '), active: z?.active ?? true };
+  const [f, setF] = useState(initial);
+  const [open, setOpen] = useState(!!z);
+  const [saved, setSaved] = useState(false);
+  const body = { name: f.name.trim(), fee: Number(f.fee), suburbs: splitSuburbs(f.suburbs), active: f.active };
+  const save = useAdminMutation(() => z ? api(`/admin/zones/${z.id}`, { method: 'PUT', body }) : api(`/admin/stores/${storeId}/zones`, { method: 'POST', body }));
+  const errors: Record<string, string> = {};
+  if (!f.name.trim()) errors.name = 'Enter a zone name';
+  if (f.fee === '' || !(Number(f.fee) >= 0 && Number(f.fee) <= 5000)) errors.fee = 'Enter a fee from R0 to R5000';
+  if (body.suburbs.some(x => x.length < 2 || x.length > 60)) errors.suburbs = 'Each suburb must be 2 to 60 characters';
+  const dirty = JSON.stringify(f) !== JSON.stringify(initial);
+  const set = (k: 'name' | 'fee' | 'suburbs') => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { setSaved(false); setF(x => ({ ...x, [k]: e.target.value })); };
+  const id = z?.id ?? `new-${storeId}`;
+  if (!open) return <Button size="sm" variant="secondary" className="mt-3" onClick={() => setOpen(true)}><Plus className="size-4" aria-hidden /> Add zone</Button>;
+  const Tag = z ? 'li' : 'div';
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3">
-      <label htmlFor={id} className="font-semibold">{z.name}</label>
-      <div className="flex items-center gap-2">
-        <span className="text-ink-3">R</span>
-        <input id={id} inputMode="decimal" className="field !min-h-10 !w-24 py-1.5 text-right" value={fee} onChange={e => setFee(e.target.value)} aria-invalid={!valid} />
-        <Button size="sm" variant={valid && Number(fee) !== Number(z.fee) ? 'primary' : 'secondary'} disabled={!valid || Number(fee) === Number(z.fee)} busy={save.isPending} onClick={() => save.mutate(undefined)}>Save</Button>
-      </div>
-      {save.isError && <p className="w-full text-sm text-danger-text" role="alert">{save.error.message}</p>}
-    </li>
+    <Tag className={`rounded-xl border border-line p-4 ${z ? '' : 'mt-3'}`}>
+      <form noValidate className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]" aria-label={z ? `Edit ${z.name}` : 'Add delivery zone'}
+        onSubmit={e => { e.preventDefault(); if (Object.keys(errors).length) return; save.mutate(undefined, { onSuccess: () => { setSaved(true); if (!z) { setF(initial); setOpen(false); } } }); }}>
+        <Field id={`zn-${id}`} label="Zone name" placeholder="e.g. Zone 4 – Far East" value={f.name} onChange={set('name')} error={errors.name} />
+        <Field id={`zf-${id}`} label="Fee (R)" inputMode="decimal" value={f.fee} onChange={set('fee')} error={errors.fee} />
+        <TextArea id={`zs-${id}`} label="Suburbs (comma or one per line)" className="sm:col-span-2" rows={2} placeholder="e.g. Bedfordview, Edenvale, Primrose" value={f.suburbs} onChange={set('suburbs')} error={errors.suburbs} />
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
+          <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" className="size-5 accent-[var(--color-brand)]" checked={f.active} onChange={e => { setSaved(false); setF(x => ({ ...x, active: e.target.checked })); }} /> Delivering to this zone</label>
+          <span className="flex items-center gap-2">
+            {saved && !dirty && <span className="text-sm font-semibold text-ok-text" role="status">Saved</span>}
+            {!z && <Button type="button" size="sm" variant="ghost" onClick={() => { setF(initial); setOpen(false); }}>Cancel</Button>}
+            <Button type="submit" size="sm" disabled={!!z && !dirty} busy={save.isPending}>{z ? 'Save zone' : 'Add zone'}</Button>
+          </span>
+        </div>
+      </form>
+      {save.isError && <p className="mt-2 text-sm font-semibold text-danger-text" role="alert">{save.error.message}</p>}
+    </Tag>
   );
 }

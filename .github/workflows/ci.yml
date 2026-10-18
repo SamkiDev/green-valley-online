@@ -1,0 +1,90 @@
+# Runs on every push and pull request: type checks, builds, API end-to-end checks, the Paystack mock test
+# and the Playwright browser tests, against a throwaway Postgres database.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: greenvalley
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d greenvalley"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # Test-only values for the throwaway CI database. Real secrets never go in this file.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/greenvalley
+      JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-else
+      WEB_ORIGIN: http://localhost:5180
+      PAYMENT_PROVIDER: demo
+      RATE_LIMIT_PER_MINUTE: '5000'
+      UNPAID_ORDER_MINUTES: '30'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Prepare database (migrations + demo data)
+        working-directory: apps/api
+        run: |
+          npx prisma generate
+          npx prisma migrate reset --force
+
+      - name: Type check
+        run: npm run typecheck
+      - name: Build web app
+        run: npm run build:web
+      - name: Build API
+        run: npm run build -w apps/api
+
+      - name: Start API
+        working-directory: apps/api
+        run: |
+          nohup npx tsx src/server.ts > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:4000/api/stores > /dev/null && exit 0; sleep 1; done
+          cat api.log; exit 1
+
+      - name: API end-to-end checks
+        run: npm run test:e2e -w apps/api
+      - name: Paystack integration (mock Paystack)
+        run: npm run test:paystack -w apps/api
+
+      - name: Fresh demo data for the browser tests
+        working-directory: apps/api
+        run: npx prisma migrate reset --force --skip-generate
+
+      - name: Install Chromium for Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests (Playwright)
+        run: npm run test:browser -w apps/web
+
+      - name: Upload browser test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+      - name: API log
+        if: failure()
+        run: cat apps/api/api.log || true

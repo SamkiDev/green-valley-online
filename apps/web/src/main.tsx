@@ -19,6 +19,8 @@ import './index.css';
 const named = <K extends string>(load: () => Promise<Record<K, React.ComponentType>>, name: K) => lazy(() => load().then(mod => ({ default: mod[name] })));
 // Checkout, account and order pages load when first visited.
 const Account = lazy(() => import('./pages/Account'));
+const Privacy = named(() => import('./pages/Legal'), 'Privacy');
+const Terms = named(() => import('./pages/Legal'), 'Terms');
 const Wholesale = lazy(() => import('./pages/Wholesale'));
 const TrackOrder = lazy(() => import('./pages/TrackOrder'));
 const Checkout = lazy(() => import('./pages/Checkout'));
@@ -34,6 +36,7 @@ const Products = named(() => import('./pages/admin/Products'), 'Products');
 const Inventory = named(() => import('./pages/admin/Products'), 'Inventory');
 const Customers = named(() => import('./pages/admin/People'), 'Customers');
 const Drivers = named(() => import('./pages/admin/People'), 'Drivers');
+const StaffAccounts = named(() => import('./pages/admin/People'), 'StaffAccounts');
 const StoresSettings = named(() => import('./pages/admin/Settings'), 'StoresSettings');
 const Analytics = named(() => import('./pages/admin/Analytics'), 'Analytics');
 const Questions = named(() => import('./pages/admin/Inbox'), 'Questions');
@@ -70,6 +73,8 @@ const router = createBrowserRouter([
       { path: '/deals', element: <Deals /> },
       { path: '/track', element: <TrackOrder /> },
       { path: '/about', element: <About /> },
+      { path: '/privacy', element: <Privacy /> },
+      { path: '/terms', element: <Terms /> },
       { path: '/account', element: <Account /> },
       { path: '/wholesale', element: <Wholesale /> },
       { path: '*', element: <NotFound /> },
@@ -93,6 +98,7 @@ const router = createBrowserRouter([
         { path: 'analytics', element: <Analytics /> },
         { path: 'customers', element: adminOnly(<Customers />) },
         { path: 'drivers', element: adminOnly(<Drivers />) },
+        { path: 'staff', element: adminOnly(<StaffAccounts />) },
         { path: 'stores', element: adminOnly(<StoresSettings />) },
         { path: 'wholesale', element: adminOnly(<WholesaleRequests />) },
       ],

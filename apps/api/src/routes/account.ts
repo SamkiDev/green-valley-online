@@ -2,7 +2,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { db, fail, h, me, need, saPhone } from '../core';
+import { db, fail, h, me, need, saPhone, setSession } from '../core';
 import { addressInput } from './orders';
 
 export const accountRoutes = express.Router();
@@ -19,7 +19,15 @@ accountRoutes.post('/password', h(async (req, res) => {
   const u = await db.user.findUniqueOrThrow({ where: { id: me(res).id } });
   if (!(await bcrypt.compare(b.current, u.passwordHash))) throw fail(400, 'Your current password is incorrect');
   if (b.current === b.next) throw fail(400, 'Choose a password you have not used here');
-  await db.user.update({ where: { id: u.id }, data: { passwordHash: await bcrypt.hash(b.next, 12) } });
+  // A new password signs out every other device; this one gets a fresh session.
+  const updated = await db.user.update({ where: { id: u.id }, data: { passwordHash: await bcrypt.hash(b.next, 12), mustChangePassword: false, tokenVersion: { increment: 1 } } });
+  setSession(res, updated.id, updated.tokenVersion);
+  res.json({ ok: true });
+}));
+
+accountRoutes.post('/logout-all', h(async (_req, res) => { // sign out on every device, including this one
+  await db.user.update({ where: { id: me(res).id }, data: { tokenVersion: { increment: 1 } } });
+  res.clearCookie('gvo');
   res.json({ ok: true });
 }));
 

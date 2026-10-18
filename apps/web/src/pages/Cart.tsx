@@ -49,8 +49,9 @@ export default function Cart() {
     <div className="container-page">
       <PageHeader title="Your cart">{cart.count} {cart.count === 1 ? 'item' : 'items'} from {store.data.name}</PageHeader>
       {notice && (
-        <div className={`mb-4 rounded-2xl p-4 ${notice.skipped.length ? 'bg-warn-bg text-warn-text' : 'bg-ok-bg text-ok-text'}`} role="status">
+        <div className={`mb-4 rounded-2xl p-4 ${notice.skipped.length || notice.partial?.length ? 'bg-warn-bg text-warn-text' : 'bg-ok-bg text-ok-text'}`} role="status">
           <p className="font-bold">{notice.added.length ? `Added ${notice.added.length} ${notice.added.length === 1 ? 'item' : 'items'} from your past order.` : 'Nothing from that order could be added.'}</p>
+          {!!notice.partial?.length && <ul className="mt-1 list-disc pl-5 text-sm">{notice.partial.map(x => <li key={x.name}>{x.name}: {x.reason}</li>)}</ul>}
           {notice.skipped.length > 0 && <ul className="mt-1 list-disc pl-5 text-sm">{notice.skipped.map(x => <li key={x.name}>{x.name}: {x.reason}</li>)}</ul>}
         </div>
       )}

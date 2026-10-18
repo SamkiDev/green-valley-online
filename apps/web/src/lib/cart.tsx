@@ -1,8 +1,11 @@
-// Cart lives in the browser (works for guests). It stores only product IDs and quantities:
+// Cart lives in the browser (works for guests) and, for signed-in customers, is also saved to their account.
+// It stores only product IDs and quantities:
 // names, prices and stock are always read fresh from the API, and the server recomputes totals at checkout.
 // An order comes from one store, so the cart belongs to one store at a time.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { load, save } from './storage';
+import { api } from './api';
+import { useMe } from './auth';
 
 export type CartLine = { productId: string; quantity: number };
 export type Fulfilment = 'DELIVERY' | 'COLLECTION';
@@ -38,6 +41,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
     window.addEventListener('storage', onStorage); return () => window.removeEventListener('storage', onStorage);
   }, []);
 
+  useAccountSync(state, setState);
+
   const add = useCallback((productId: string, quantity: number, storeSlug = DEFAULT_STORE, opts?: { replace?: boolean }) => {
     const cur = ref.current;
     if (cur.lines.length && cur.storeSlug !== storeSlug && !opts?.replace) return false;
@@ -67,6 +72,62 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
+
+/**
+ * Signed-in customers: the cart is also saved to their account, so it follows them between devices.
+ * On sign-in the browser cart and the saved cart are merged (items in this browser win); after that every
+ * change is saved shortly after it happens. On sign-out the browser cart is emptied, so the next person
+ * using a shared phone doesn't see it.
+ */
+function useAccountSync(state: CartState, setState: (s: CartState) => void) {
+  const { data: me } = useMe();
+  const customerId = me?.role === 'CUSTOMER' ? me.id : null;
+  const syncedFor = useRef<string | null>(null);
+  const lastSaved = useRef('');
+  const wasCustomer = useRef<string | null>(null);
+  const stateRef = useRef(state); stateRef.current = state;
+
+  // Sign-in (or page load while signed in): merge once per customer.
+  useEffect(() => {
+    if (me === undefined) return; // still loading
+    if (!customerId) {
+      if (wasCustomer.current) { setState({ ...initial }); syncedFor.current = null; lastSaved.current = ''; } // signed out
+      wasCustomer.current = null;
+      return;
+    }
+    wasCustomer.current = customerId;
+    if (syncedFor.current === customerId) return;
+    let cancelled = false;
+    api<(CartState & { updatedAt: string }) | null>('/cart').then(saved => {
+      if (cancelled) return;
+      const local = stateRef.current;
+      let merged: CartState = local;
+      if (saved && saved.lines.length) {
+        if (!local.lines.length) merged = { storeSlug: saved.storeSlug, fulfilment: saved.fulfilment, zoneId: saved.zoneId, lines: saved.lines };
+        else if (local.storeSlug === saved.storeSlug) merged = { ...local, lines: [...local.lines, ...saved.lines.filter(l => !local.lines.some(x => x.productId === l.productId))].slice(0, 50) };
+        // Different stores: the cart in this browser is the newer intent, keep it.
+      }
+      syncedFor.current = customerId;
+      lastSaved.current = saved ? JSON.stringify(pick(saved)) : '';
+      setState(merged);
+    }).catch(() => { /* offline or signed out meanwhile: the browser cart still works */ });
+    return () => { cancelled = true; };
+  }, [customerId, me, setState]);
+
+
+  // After the merge: save changes, batched so typing a quantity doesn't send a request per keystroke.
+  useEffect(() => {
+    if (!customerId || syncedFor.current !== customerId) return;
+    const body = JSON.stringify(pick(state));
+    if (body === lastSaved.current) return;
+    const t = setTimeout(() => {
+      api('/cart', { method: 'PUT', body: pick(state) }).then(() => { lastSaved.current = body; }).catch(() => { /* retried on the next change */ });
+    }, 700);
+    return () => clearTimeout(t);
+  }, [state, customerId]);
+}
+
+const pick = (s: CartState): CartState => ({ storeSlug: s.storeSlug, fulfilment: s.fulfilment, zoneId: s.zoneId, lines: s.lines.map(l => ({ productId: l.productId, quantity: l.quantity })) });
 
 export function useCart() {
   const c = useContext(Ctx);

@@ -21,12 +21,16 @@ export type Driver = {
   active: { id: string; orderNumber: string; area: string | null; status: string }[]; delivered: number;
   history: { id: string; orderNumber: string; area: string | null; deliveredAt: string | null }[];
 };
-export type AdminStore = { id: string; slug: string; name: string; category: string; description: string | null; status: string; ageRestricted: boolean; config: StoreConfig; zones: { id: string; name: string; fee: string; active: boolean }[]; _count: { products: number } };
+export type AdminStore = { id: string; slug: string; name: string; category: string; description: string | null; status: string; ageRestricted: boolean; config: StoreConfig; zones: Zone[]; _count: { products: number } };
 export type Analytics = { days: number; orders: number; revenue: number; averageOrderValue: number; topProducts: { productId: string; name: string; revenue: number; quantity: number; orders: number }[]; last7Days: { date: string; revenue: number }[] };
 export type Wholesale = { id: string; name: string; business: string; phone: string; email: string; products: string; quantity: string; preferredDate: string | null; notes: string | null; createdAt: string };
-export type Question = { id: string; text: string; createdAt: string; product: { name: string }; customer: { user: { name: string } } | null; answers: { id: string; text: string; createdAt: string }[] };
+export type Question = { id: string; text: string; createdAt: string; product: { name: string }; customer: { user: { name: string } } | null; answers: { id: string; text: string; createdAt: string; approved: boolean }[] };
+export type Zone = { id: string; name: string; fee: string; active: boolean; suburbs: string[] };
+export type Staff = { id: string; user: { id: string; name: string; email: string; phone: string | null; active: boolean; createdAt: string }; store: { id: string; name: string } };
+export type ImportRow = { row: number; name: string; store: string; action: 'create' | 'update' | 'error'; errors: string[]; changes?: string[] };
+export type ImportResult = { dryRun: boolean; summary: { create: number; update: number; errors: number }; results: ImportRow[] };
 
-export const useAdmin = <T,>(path: string, opts: { refetchInterval?: number; enabled?: boolean } = {}) =>
+export const useAdmin = <T,>(path: string, opts: { refetchInterval?: number; refetchIntervalInBackground?: boolean; enabled?: boolean } = {}) =>
   useQuery({ queryKey: ['admin', path], queryFn: () => api<T>('/admin' + path), ...opts });
 
 // Mutations refresh every admin query afterwards, so all panels stay consistent.

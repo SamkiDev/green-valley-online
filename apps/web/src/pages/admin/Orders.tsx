@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowRight, ClipboardList } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { dateTime, rand } from '../../lib/format';
-import { Badge, DemoTag, EmptyState, ErrorState, Skeleton } from '../../components/ui';
+import { Badge, Button, DemoTag, EmptyState, ErrorState, Skeleton } from '../../components/ui';
 import { AdminHeader } from './AdminLayout';
 import { nextStatuses, ORDER_LABEL, ORDER_TONE, useAdmin, useAdminMutation, type AdminOrder, type InventoryRow, type OrderStatus, type Stats } from './adminApi';
 
@@ -85,9 +85,20 @@ export function Orders() {
   const [filter, setFilter] = useState('active');
   const f = FILTERS.find(x => x.key === filter)!;
   const list = orders.data?.filter(o => f.match(o.status)) ?? [];
+  const { data: me } = useMe();
+  const [released, setReleased] = useState<string | null>(null);
+  const release = useAdminMutation(() => api<{ checked: number; minutes: number }>('/admin/orders/release-unpaid', { method: 'POST' }));
+  const unpaid = orders.data?.filter(o => o.status === 'PLACED').length ?? 0;
   return (
     <>
-      <AdminHeader title="Orders">Change status, assign drivers and follow every order. Delivery progress is updated by the driver.</AdminHeader>
+      <AdminHeader title="Orders" actions={me?.role === 'ADMIN' && unpaid > 0 && (
+        <Button size="sm" variant="secondary" busy={release.isPending}
+          onClick={() => release.mutate(undefined, { onSuccess: r => setReleased(`Checked ${r.checked} unpaid order${r.checked === 1 ? '' : 's'}. Orders unpaid for more than ${r.minutes} minutes were cancelled and their stock returned.`) })}>
+          Release unpaid orders
+        </Button>
+      )}>Change status, assign drivers and follow every order. Delivery progress is updated by the driver. Unpaid orders are cancelled automatically after a while so their stock goes back on sale.</AdminHeader>
+      {released && <p className="mb-3 rounded-xl bg-ok-bg p-3 text-sm font-semibold text-ok-text" role="status">{released}</p>}
+      {release.isError && <p className="mb-3 rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text" role="alert">{release.error.message}</p>}
       <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0" role="group" aria-label="Filter orders">
         {FILTERS.map(x => (
           <button key={x.key} type="button" aria-pressed={filter === x.key} onClick={() => setFilter(x.key)}

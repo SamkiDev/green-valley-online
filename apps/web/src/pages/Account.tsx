@@ -9,15 +9,18 @@ import { Button, EmptyState, ErrorState, LinkButton, PageHeader, Skeleton } from
 import { Field } from '../components/Field';
 import { MyOrders } from '../components/OrdersList';
 import { ProductCard, ProductGridSkeleton } from '../components/ProductCard';
+import { ChooseNewPassword } from '../components/ChooseNewPassword';
+import { ConsentCheckbox } from './Legal';
 
 const ROLE_LABEL = { CUSTOMER: 'Customer', STORE_STAFF: 'Store staff', DRIVER: 'Driver', ADMIN: 'Admin' } as const;
 
 export default function Account() {
   const me = useMe();
-  const { logout } = useAuthActions();
+  const { logout, logoutAll } = useAuthActions();
   if (me.isPending) return <div className="container-page"><PageHeader title="Account" /><Skeleton className="h-48 max-w-md" /></div>;
   if (me.isError) return <div className="container-page"><PageHeader title="Account" /><ErrorState message={me.error.message} onRetry={() => me.refetch()} /></div>;
   if (!me.data) return <AuthForms />;
+  if (me.data.mustChangePassword) return <ChooseNewPassword name={me.data.name} />;
 
   const customer = me.data.role === 'CUSTOMER';
   const tabs = customer ? TABS : TABS.filter(t => t.key === 'profile');
@@ -25,8 +28,11 @@ export default function Account() {
     <div className="container-page">
       <PageHeader eyebrow="Account" title={`Hello, ${me.data.name.split(' ')[0]}`}>Signed in as {ROLE_LABEL[me.data.role]}{customer ? '' : '. Use the staff portal for your work.'}</PageHeader>
       <AccountTabs tabs={tabs} />
-      <Button variant="secondary" className="mt-8" busy={logout.isPending} onClick={() => logout.mutate()}><LogOut className="size-4" aria-hidden /> Sign out</Button>
-      {logout.isError && <p className="mt-2 text-sm text-danger-text" role="alert">{logout.error.message}</p>}
+      <div className="mt-8 flex flex-wrap gap-2">
+        <Button variant="secondary" busy={logout.isPending} onClick={() => logout.mutate()}><LogOut className="size-4" aria-hidden /> Sign out</Button>
+        <Button variant="ghost" busy={logoutAll.isPending} onClick={() => window.confirm('Sign out on every device, including this one?') && logoutAll.mutate()}>Sign out everywhere</Button>
+      </div>
+      {(logout.error ?? logoutAll.error) && <p className="mt-2 text-sm text-danger-text" role="alert">{(logout.error ?? logoutAll.error)!.message}</p>}
     </div>
   );
 }
@@ -68,7 +74,7 @@ function Profile() {
   const [pw, setPw] = useState({ current: '', next: '' });
   const [touched, setTouched] = useState({ profile: false, pw: false });
   const save = useMutation({ mutationFn: () => api('/account/profile', { method: 'PATCH', body: { name: f.name.trim(), phone: f.phone.trim() } }), onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }) });
-  const change = useMutation({ mutationFn: () => api('/account/password', { method: 'POST', body: pw }), onSuccess: () => setPw({ current: '', next: '' }) });
+  const change = useMutation({ mutationFn: () => api('/account/password', { method: 'POST', body: pw }), onSuccess: () => setPw({ current: '', next: '' }) }); // other devices are signed out
   const nameErr = touched.profile && !f.name.trim() ? 'Enter your name' : undefined;
   const phoneErr = touched.profile && f.phone.trim() && !isSaPhone(f.phone) ? 'Enter a South African number, e.g. 082 123 4567' : undefined;
   const curErr = touched.pw && !pw.current ? 'Enter your current password' : undefined;
@@ -88,7 +94,7 @@ function Profile() {
         <Field id="pr-current" label="Current password" type="password" autoComplete="current-password" value={pw.current} onChange={e => { change.reset(); setPw(s => ({ ...s, current: e.target.value })); }} error={curErr} />
         <Field id="pr-next" label="New password" type="password" autoComplete="new-password" value={pw.next} onChange={e => { change.reset(); setPw(s => ({ ...s, next: e.target.value })); }} error={nextErr} hint="At least 8 characters" />
         {change.isError && <p className="text-sm font-semibold text-danger-text" role="alert">{change.error.message}</p>}
-        <div className="flex items-center gap-3"><Button type="submit" variant="secondary" busy={change.isPending}>Change password</Button>{change.isSuccess && <span className="text-sm font-semibold text-ok-text" role="status">Password changed</span>}</div>
+        <div className="flex items-center gap-3"><Button type="submit" variant="secondary" busy={change.isPending}>Change password</Button>{change.isSuccess && <span className="text-sm font-semibold text-ok-text" role="status">Password changed. Other devices were signed out.</span>}</div>
       </form>
     </div>
   );
@@ -176,6 +182,7 @@ function AuthForms() {
   const [params] = useSearchParams();
   const next = params.get('next');
   const [f, setF] = useState({ name: '', email: '', phone: '', password: '' });
+  const [consent, setConsent] = useState(false);
   const [touched, setTouched] = useState(false);
   const m = mode === 'login' ? login : register;
   const serverErrors = m.error instanceof ApiError ? m.error.details : undefined;
@@ -186,13 +193,14 @@ function AuthForms() {
   if (mode === 'register' && f.phone && !/^[+\d][\d\s-]{8,18}$/.test(f.phone.trim())) errors.phone = 'Enter a valid phone number';
   if (mode === 'register' ? f.password.length < 8 : !f.password) errors.password = mode === 'register' ? 'Use at least 8 characters' : 'Enter your password';
   const show = (k: keyof typeof f) => (touched ? errors[k] : undefined) ?? serverErrors?.[k]?.[0];
+  const consentErr = mode === 'register' && !consent ? 'Please accept the privacy policy and terms to create an account' : undefined;
 
   const submit = (e: FormEvent) => {
     e.preventDefault(); setTouched(true);
-    if (Object.keys(errors).length) return;
+    if (Object.keys(errors).length || consentErr) return;
     const done = { onSuccess: () => next && next.startsWith('/') && nav(next) };
     if (mode === 'login') login.mutate({ email: f.email.trim(), password: f.password }, done);
-    else register.mutate({ name: f.name.trim(), email: f.email.trim(), password: f.password, ...(f.phone.trim() ? { phone: f.phone.trim() } : {}) }, done);
+    else register.mutate({ name: f.name.trim(), email: f.email.trim(), password: f.password, acceptPrivacy: true, ...(f.phone.trim() ? { phone: f.phone.trim() } : {}) }, done);
   };
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF(s => ({ ...s, [k]: e.target.value }));
 
@@ -211,8 +219,10 @@ function AuthForms() {
           <Field id="acc-email" label="Email" type="email" autoComplete="email" inputMode="email" value={f.email} onChange={set('email')} error={show('email')} />
           {mode === 'register' && <Field id="acc-phone" label="Phone (optional)" type="tel" autoComplete="tel" inputMode="tel" value={f.phone} onChange={set('phone')} error={show('phone')} />}
           <Field id="acc-password" label="Password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={f.password} onChange={set('password')} error={show('password')} hint={mode === 'register' ? 'At least 8 characters' : undefined} />
+          {mode === 'register' && <ConsentCheckbox id="acc-consent" checked={consent} onChange={setConsent} error={touched ? consentErr : undefined} />}
           {m.isError && !serverErrors && <p className="rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text" role="alert">{m.error.message}</p>}
           <Button type="submit" size="lg" className="w-full" busy={m.isPending}>{mode === 'login' ? 'Sign in' : 'Create account'}</Button>
+          {mode === 'login' && <p className="text-sm text-ink-3">Forgot your password? Contact the store on WhatsApp or in person. We'll give you a temporary password, and you choose a new one when you sign in.</p>}
         </form>
       </div>
       <p className="mt-4 text-sm text-ink-3">Just browsing? <LinkButton to="/shop" variant="ghost" size="sm">Continue shopping</LinkButton></p>

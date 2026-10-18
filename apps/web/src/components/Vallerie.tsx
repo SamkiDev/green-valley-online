@@ -24,6 +24,7 @@ export function Vallerie() {
   const loc = useLocation();
   const cart = useCart();
   const lastFailed = entries.at(-1)?.failed;
+  const [basic, setBasic] = useState(false); // no AI key on the server: answers come straight from the catalogue
 
   useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify(entries.slice(-30))); } catch { /* ignore */ } }, [entries]);
   useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 50); }, [open]);
@@ -39,7 +40,7 @@ export function Vallerie() {
       const history: ChatMsg[] = entries.filter(e => !e.failed).slice(-6).map(e => ({ role: e.role, content: e.content }));
       return api<ChatResponse>('/ai/chat', { method: 'POST', body: { message, history } });
     },
-    onSuccess: r => setEntries(es => [...es, { role: 'assistant', content: r.reply, products: r.products }]),
+    onSuccess: r => { setBasic(r.mode === 'basic'); setEntries(es => [...es, { role: 'assistant', content: r.reply, products: r.products }]); },
     onError: (e: Error) => setEntries(es => [...es, { role: 'assistant', content: e.message === UNAVAILABLE || !e.message ? UNAVAILABLE : `${UNAVAILABLE} (${e.message})`, failed: true }]),
   });
 
@@ -70,11 +71,12 @@ export function Vallerie() {
             <div className="min-w-0 flex-1">
               <h2 id="vallerie-title" className="font-extrabold leading-tight">Vallerie</h2>
               <p className="text-xs text-on-panel-2">Green Valley Online Assistant</p>
-              <p className={`text-xs font-semibold ${lastFailed ? 'text-amber-300' : 'text-emerald-300'}`}>● {lastFailed ? 'Unavailable' : 'Online'}</p>
+              <p className={`text-xs font-semibold ${lastFailed ? 'text-amber-300' : 'text-emerald-300'}`}>● {lastFailed ? 'Unavailable' : basic ? 'Basic mode' : 'Online'}</p>
             </div>
             <button type="button" onClick={() => setOpen(false)} className="grid size-11 place-items-center rounded-xl hover:bg-white/10" aria-label="Close Vallerie"><X className="size-5" aria-hidden /></button>
           </header>
 
+          {basic && !lastFailed && <p className="border-b border-line bg-surface-2 px-4 py-2 text-xs text-ink-2" role="note">Basic mode: Vallerie answers common questions (products, prices, braai planning, delivery, your order) from the shop's catalogue. Full AI answers switch on when the store adds an AI key.</p>}
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
             <Bubble role="assistant">Hi! I'm Vallerie. I can help you find products, plan a braai, or explain delivery and your order. I use the shop's live catalogue, so prices and stock are up to date.</Bubble>
             {entries.map((e, i) => (

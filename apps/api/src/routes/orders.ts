@@ -64,6 +64,7 @@ function tracking(o: TrackOrder) {
 }
 
 const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
+export const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 export const addressInput = z.object({
   street: z.string().trim().min(3).max(120), area: z.string().trim().min(2).max(80), city: z.string().trim().min(2).max(80),
   province: z.enum(PROVINCES), postalCode: z.string().trim().regex(/^\d{4}$/, 'Use a 4-digit postal code'),
@@ -78,7 +79,7 @@ orderRoutes.post('/', h(async (req, res) => {
   const b = z.object({
     storeSlug: z.string(), fulfilment: z.enum(['DELIVERY', 'COLLECTION']), zoneId: z.string().optional(),
     contact: z.object({ firstName: z.string().trim().min(1).max(60), lastName: z.string().trim().min(1).max(60), phone: saPhone, email: z.string().trim().email().max(120) }),
-    address: addressInput.optional(), saveAddress: z.boolean().optional(), ageConfirmed: z.boolean().optional(),
+    address: addressInput.optional(), saveAddress: z.boolean().optional(), ageConfirmed: z.boolean().optional(), acceptPrivacy: z.boolean().optional(),
     items: z.array(z.object({ productId: z.string(), quantity: z.number().positive().max(100) })).min(1).max(50),
   }).parse(req.body);
   const store = await db.store.findFirst({ where: { slug: b.storeSlug, status: 'ACTIVE' } }); if (!store) throw fail(400, 'Store not available');
@@ -87,10 +88,20 @@ orderRoutes.post('/', h(async (req, res) => {
     const min = (store.config as any)?.ageVerification?.minimumAge ?? 18;
     throw fail(400, `Please confirm you are ${min} or older to order from ${store.name}.`);
   }
+  // Guests accept the privacy policy at checkout; account holders accepted it when registering.
+  if (!u && b.acceptPrivacy !== true) throw fail(400, 'Please accept the privacy policy and terms to place your order.');
   let fee = 0;
   if (b.fulfilment === 'DELIVERY') {
     if (!b.address || !b.zoneId) throw fail(400, 'Address and delivery zone required');
-    const zone = await db.deliveryZone.findFirst({ where: { id: b.zoneId, storeId: store.id, active: true } }); if (!zone) throw fail(400, 'Invalid delivery zone');
+    const zones = await db.deliveryZone.findMany({ where: { storeId: store.id, active: true } });
+    const zone = zones.find(z => z.id === b.zoneId); if (!zone) throw fail(400, 'Invalid delivery zone');
+    // When the store lists suburbs per zone, the address must be in the chosen zone.
+    if (zones.some(z => z.suburbs.length)) {
+      const area = norm(b.address.area);
+      const right = zones.find(z => z.suburbs.some(x => norm(x) === area));
+      if (!right) throw fail(400, `We don't deliver to ${b.address.area} yet. Choose collection, or contact the store.`);
+      if (right.id !== zone.id) throw fail(400, `${b.address.area} is in ${right.name}, not ${zone.name}. Please choose ${right.name}.`);
+    }
     fee = num(zone.fee);
   }
   const order = await db.$transaction(async tx => {
@@ -114,7 +125,7 @@ orderRoutes.post('/', h(async (req, res) => {
     return tx.order.create({ data: {
       customerId: u?.customerId, storeId: store.id, fulfilment: b.fulfilment,
       contactName: `${b.contact.firstName} ${b.contact.lastName}`, contactPhone: b.contact.phone, contactEmail: b.contact.email.toLowerCase(),
-      ageConfirmedAt: store.ageRestricted ? new Date() : null,
+      ageConfirmedAt: store.ageRestricted ? new Date() : null, privacyAcceptedAt: u ? null : new Date(),
       subtotal, deliveryFee: fee, total: subtotal.add(fee), addressId, addressText: b.address && `${b.address.street}, ${b.address.area}`, area: b.address?.area,
       items: { create: items }, events: { create: { status: 'PLACED', actorUserId: u?.id } },
     }, include: { items: true } });
@@ -159,8 +170,12 @@ orderRoutes.post('/:id/reorder', need('CUSTOMER'), h(async (req, res) => {
   if (!o) throw fail(404, 'Order not found');
   res.json({ storeSlug: o.store.slug, items: o.items.map(i => {
     const p = i.product, stock = num(p.inventory?.quantity ?? 0), want = num(i.quantity);
-    const reason = p.deletedAt || !p.active || p.store.status !== 'ACTIVE' ? 'no longer available' : stock <= 0 ? 'out of stock' : stock < want ? `only ${stock}${p.soldByWeight ? ' kg' : ''} in stock` : null;
-    return { productId: p.id, name: i.nameSnapshot, quantity: want, available: !reason, reason };
+    const gone = p.deletedAt || !p.active || p.store.status !== 'ACTIVE';
+    // Low stock: offer what is there (whole items, or kg to 2 decimals) rather than nothing.
+    const can = gone ? 0 : Math.min(want, p.soldByWeight ? Math.floor(stock * 100) / 100 : Math.floor(stock));
+    const unit = p.soldByWeight ? ' kg' : '';
+    const reason = gone ? 'no longer available' : can <= 0 ? 'out of stock' : can < want ? `only ${can}${unit} in stock, so ${can}${unit} was added instead of ${want}${unit}` : null;
+    return { productId: p.id, name: i.nameSnapshot, quantity: can, wanted: want, available: can > 0, partial: can > 0 && can < want, reason };
   }) });
 }));
 
@@ -183,7 +198,7 @@ const cents = (d: Prisma.Decimal) => Math.round(num(d) * 100);
 // Accept a provider's "paid" only if it is for exactly this order's amount in rand.
 const amountOk = (v: { amountCents?: number; currency?: string }, total: Prisma.Decimal) => v.amountCents === cents(total) && (v.currency ?? 'ZAR') === 'ZAR';
 
-paymentRoutes.get('/config', (_, res) => res.json({ provider: provider.name, mode: provider.mode }));
+paymentRoutes.get('/config', (_, res) => res.json({ provider: provider.name, mode: provider.mode, unpaidMinutes: UNPAID_MINUTES }));
 
 paymentRoutes.post('/:orderId/pay', h(async (req, res) => {
   const { method } = z.object({ method: z.enum(['CARD', 'EFT']) }).parse(req.body); // no card fields are accepted at all
@@ -230,3 +245,27 @@ paymentRoutes.post('/webhooks/paystack', h(async (req, res) => {
   }
   res.json({ ok: true }); // acknowledge so Paystack stops retrying
 }));
+
+// ---- unpaid orders: placing an order reserves stock; if it isn't paid in time, cancel it and put the stock back ----
+export const UNPAID_MINUTES = Number(process.env.UNPAID_ORDER_MINUTES) || 30;
+export async function sweepUnpaidOrders() {
+  const cutoff = new Date(Date.now() - UNPAID_MINUTES * 60_000);
+  const stale = await db.order.findMany({ where: { status: 'PLACED', createdAt: { lt: cutoff }, OR: [{ payment: null }, { payment: { status: { not: 'PAID' } } }] }, include: { payment: true, items: true }, take: 100 });
+  for (const o of stale) {
+    // A redirect payment may have gone through just now: ask the provider before cancelling.
+    if (o.payment?.status === 'PENDING' && provider.verify && o.payment.provider === provider.name && o.payment.providerRef) {
+      const v = await provider.verify(o.payment.providerRef).catch(() => null);
+      if (v?.status === 'PAID' && amountOk(v, o.total)) { await markPaid(o.payment.id); continue; }
+      if (v?.status === 'PENDING') continue; // still in progress at the provider; check again next round
+    }
+    await db.$transaction(async tx => {
+      const r = await tx.order.updateMany({ where: { id: o.id, status: 'PLACED' }, data: { status: 'CANCELLED' } });
+      if (!r.count) return;
+      await tx.orderStatusEvent.create({ data: { orderId: o.id, status: 'CANCELLED' } });
+      for (const i of o.items) await tx.inventory.updateMany({ where: { productId: i.productId }, data: { quantity: { increment: i.quantity } } });
+      if (o.payment && o.payment.status !== 'PAID') await tx.payment.update({ where: { id: o.payment.id }, data: { status: 'FAILED' } });
+    });
+    console.log(`Cancelled unpaid order ${orderNo(o.seq)} after ${UNPAID_MINUTES} minutes; stock returned`);
+  }
+  return stale.length;
+}
