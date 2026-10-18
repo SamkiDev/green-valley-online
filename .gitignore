@@ -11,3 +11,6 @@ apps/api/uploads/
 # Playwright
 apps/web/test-results/
 apps/web/playwright-report/
+
+# Private notes (sales script, costs pitch): kept on this computer only
+private/

@@ -6,12 +6,16 @@ E-commerce and local-delivery platform MVP for the Green Valley shopping centre 
 
 > Everything in this repo is **DEMO**: demo prices, fictional people, simulated payments and tracking. No real money is processed and no card data is collected.
 
+**Running the shop day to day?** The [user guide](docs/USER_GUIDE.md) has step-by-step instructions for admins, store staff, drivers and customers.
+
 ## Layout
 
 ```
 apps/api   Express + TypeScript + Zod + Prisma (PostgreSQL)   ← Stage 1
 apps/web   React + TypeScript + Vite + Tailwind v4            ← Stage 2 (storefront)
+docs/      user guide for the shop, drivers and customers
 docker-compose.yml   local PostgreSQL 16
+render.yaml          free hosting setup (Render + Neon)
 ```
 
 ## Run locally (Windows, Node 22, Docker Desktop)
@@ -19,7 +23,8 @@ docker-compose.yml   local PostgreSQL 16
 ```bash
 npm install
 npm run db:up                                   # start Postgres in Docker
-cp apps/api/.env.example apps/api/.env          # then set JWT_SECRET (24+ chars)
+cp apps/api/.env.example apps/api/.env          # PowerShell: Copy-Item apps/api/.env.example apps/api/.env
+                                                # then set JWT_SECRET in apps/api/.env (24+ characters)
 cd apps/api
 npx prisma migrate dev                          # create tables (also seeds)
 npm run dev                                     # API on http://localhost:4000
@@ -78,6 +83,26 @@ To check the live site with the browser tests (they place orders, so only on a d
 ```bash
 BASE_URL=https://green-valley-online.onrender.com ADMIN_PASSWORD=your-seed-password npm run test:browser -w apps/web
 ```
+
+## Going fully live
+
+The free setup is meant for demos and a trial. Before taking real customers' money:
+
+1. **Legal:** have the privacy policy and terms (`/privacy`, `/terms`, in `apps/web/src/pages/Legal.tsx`) checked by a
+   legal adviser and fill in every `[bracketed]` detail.
+2. **Always on:** in Render, change the service's instance type to **Starter** so the site never sleeps.
+3. **Own web address:** buy a `.co.za` domain, add it under the Render service's **Settings > Custom Domains**, and
+   add the DNS records Render shows at the domain registrar. Render sets up https automatically.
+4. **Real payments:** open a Paystack business account. In Render's **Environment** settings (never in the code) set
+   `PAYMENT_PROVIDER=paystack`, `PAYSTACK_SECRET_KEY` to the live secret key and `ALLOW_LIVE_PAYMENTS=true`. In the
+   Paystack dashboard set the webhook URL to `https://<your domain>/api/payments/webhooks/paystack`. Then make one
+   small real payment and refund it to check the whole flow.
+5. **Real catalogue:** import the shop's price list (it updates products with the same name and adds new ones), and mark the remaining
+   demo products unavailable or delete them.
+6. **Accounts:** disable the demo customer, driver and staff accounts, and create real staff and drivers. There is no
+   screen yet to create another admin or change the admin's sign-in email, so until that is added the owner uses
+   `admin@demo.local` with a strong password of their own.
+7. **Optional:** add `ANTHROPIC_API_KEY` in Render's Environment settings to switch Vallerie from basic mode to AI answers.
 
 ## Demo logins (DEMO ONLY)
 
