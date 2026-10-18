@@ -34,9 +34,9 @@ r = await anon('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'COLLE
 ok(r.s === 400 && r.j.details?.contact, 'guest order without contact details rejected (400)');
 
 const email = `e2e-${Date.now()}@demo.local`;
-r = await cust('POST', '/auth/register', { email, password: 'test-password-1', name: 'E2E Demo Customer', phone: '0110000000' });
+r = await cust('POST', '/auth/register', { email, password: 'test-password-1', name: 'E2E Demo Customer', phone: '0110000000', acceptPrivacy: true });
 ok(r.s === 201 && r.j.role === 'CUSTOMER', 'register customer');
-r = await cust('POST', '/auth/register', { email, password: 'test-password-1', name: 'Dup' });
+r = await cust('POST', '/auth/register', { email, password: 'test-password-1', name: 'Dup', acceptPrivacy: true });
 ok(r.s === 409, 'duplicate registration rejected (409)');
 r = await cust('POST', '/auth/register', { email: 'bad', password: 'x', name: '' });
 ok(r.s === 400 && r.j.details, 'invalid registration -> 400 with field errors', Object.keys(r.j?.details || {}).join(','));
@@ -182,7 +182,7 @@ ok((await admin('PATCH', `/admin/users/${adminMe.id}/active`, { active: false })
 
 // ---- Stage 5: guest checkout ----
 const guest = client();
-r = await guest('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, contact: { ...contact, email: 'guest@demo.local' }, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+r = await guest('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId: zone1.id, address, contact: { ...contact, email: 'guest@demo.local' }, acceptPrivacy: true, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
 const gOrder = r.j; const gHdr = { 'X-Order-Token': gOrder?.guestToken };
 ok(r.s === 201 && !!gOrder.guestToken && !gOrder.customerId, 'guest places an order and gets an access token', gOrder?.orderNumber);
 ok((await guest('GET', `/orders/${gOrder.id}`)).s === 404, 'guest order hidden without its token');
@@ -236,7 +236,7 @@ r = await anon('GET', `/reviews?productId=${P('Family Braai Pack').id}`);
 ok(r.j.count === 1 && r.j.average === 5 && r.j.reviews[0].name === 'E2E', 'reviews public with first name only', JSON.stringify(r.j.reviews[0]));
 ok((await cust('POST', '/reviews', { storeSlug: 'meat-market', rating: 4, comment: 'Friendly service and quick delivery.' })).s === 201, 'store review posted');
 const newbie = client();
-await newbie('POST', '/auth/register', { email: `newbie-${Date.now()}@demo.local`, password: 'test-password-1', name: 'New Person' });
+await newbie('POST', '/auth/register', { email: `newbie-${Date.now()}@demo.local`, password: 'test-password-1', name: 'New Person', acceptPrivacy: true });
 r = await newbie('POST', '/reviews', { productId: P('Family Braai Pack').id, rating: 1, comment: 'Never bought it' });
 ok(r.s === 403, 'customers without a completed order cannot review', r.j?.error);
 ok((await cust('POST', '/reviews', { productId: P('Family Braai Pack').id, rating: 9, comment: 'x' })).s === 400, 'invalid rating rejected');
@@ -303,6 +303,118 @@ await drv('POST', `/deliveries/${gDel.id}/advance`, { from: 'OUT_FOR_DELIVERY' }
 await drv('POST', `/deliveries/${gDel.id}/advance`, { from: 'ARRIVED' });
 t6 = (await cust('GET', `/orders/${gps.id}/tracking`)).j;
 ok(t6.status === 'DELIVERED' && t6.driverLocation === null, 'position hidden once delivered');
+
+// ---- Free fixes: consent ----
+ok((await client()('POST', '/auth/register', { email: `noconsent-${Date.now()}@demo.local`, password: 'test-password-1', name: 'No Consent' })).s === 400, 'registration needs privacy consent');
+ok((await client()('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'COLLECTION', contact, items: [{ productId: P('Braai Pack').id, quantity: 1 }] })).s === 400, 'guest order needs privacy consent');
+
+// ---- Free fixes: unpaid orders release their stock ----
+const { PrismaClient } = await import('@prisma/client');
+const pdb = new PrismaClient();
+const pid = P('Lamb Ribs').id;
+const lambBefore = Number((await anon('GET', `/products/${pid}`)).j.inventory.quantity);
+const unpaid = (await cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'COLLECTION', contact, items: [{ productId: pid, quantity: 1 }] })).j;
+ok(Number((await anon('GET', `/products/${pid}`)).j.inventory.quantity) === lambBefore - 1, 'placing an order reserves stock');
+await admin('POST', '/admin/orders/release-unpaid');
+ok((await cust('GET', `/orders/${unpaid.id}`)).j.status === 'PLACED', 'a recent unpaid order is kept');
+await pdb.order.update({ where: { id: unpaid.id }, data: { createdAt: new Date(Date.now() - 31 * 60_000) } }); // pretend 31 minutes passed
+r = await admin('POST', '/admin/orders/release-unpaid');
+ok(r.s === 200 && (await cust('GET', `/orders/${unpaid.id}`)).j.status === 'CANCELLED' && Number((await anon('GET', `/products/${pid}`)).j.inventory.quantity) === lambBefore, 'unpaid order cancelled after 30 minutes and stock returned');
+ok((await cust('POST', `/payments/${unpaid.id}/pay`, { method: 'CARD' })).s === 409, 'a cancelled order cannot be paid');
+
+// ---- Free fixes: sessions, staff accounts, temporary passwords ----
+const s1 = client(), s2 = client();
+const sEmail = `sessions-${Date.now()}@demo.local`;
+await s1('POST', '/auth/register', { email: sEmail, password: 'test-password-1', name: 'Session Tester', acceptPrivacy: true });
+await s2('POST', '/auth/login', { email: sEmail, password: 'test-password-1' });
+await s1('POST', '/account/password', { current: 'test-password-1', next: 'test-password-2' });
+ok((await s1('GET', '/auth/me')).j?.email === sEmail && (await s2('GET', '/auth/me')).j === null, 'changing password signs out other devices only');
+await s1('POST', '/account/logout-all');
+ok((await s1('GET', '/auth/me')).j === null, 'sign out everywhere works');
+const staffEmail = `staff-${Date.now()}@demo.local`;
+r = await admin('POST', '/admin/staff', { name: 'New Staff', email: staffEmail, password: 'first-password-1', storeId: meatStore.id });
+ok(r.s === 201, 'admin creates a store staff account');
+ok((await admin('POST', '/admin/staff', { name: 'Dup', email: staffEmail, password: 'first-password-1', storeId: meatStore.id })).s === 409, 'duplicate staff email rejected');
+const st = client(); r = await st('POST', '/auth/login', { email: staffEmail, password: 'first-password-1' });
+ok(r.j?.role === 'STORE_STAFF' && r.j.mustChangePassword === true, 'new staff must change password at first sign-in');
+ok((await st('GET', '/admin/orders')).s === 200 && (await admin('GET', '/admin/staff')).j.some(x => x.user.email === staffEmail), 'staff can work and is listed');
+const target = client(); await target('POST', '/auth/login', { email: sEmail, password: 'test-password-2' });
+const targetId = (await target('GET', '/auth/me')).j.id;
+r = await admin('POST', `/admin/users/${targetId}/temporary-password`);
+const temp = r.j?.temporaryPassword;
+ok(r.s === 200 && /^[a-z]+-\d{4}-[0-9a-f]{4}$/.test(temp ?? ''), 'admin issues a temporary password', temp ? '(issued)' : '');
+ok((await target('GET', '/auth/me')).j === null, 'temporary password signs the user out');
+const t2 = client(); r = await t2('POST', '/auth/login', { email: sEmail, password: temp });
+ok(r.s === 200 && r.j.mustChangePassword === true, 'sign in with the temporary password, must change it');
+await t2('POST', '/account/password', { current: temp, next: 'test-password-3' });
+ok((await t2('GET', '/auth/me')).j?.mustChangePassword === false, 'changing the password clears the flag');
+await admin('PATCH', `/admin/users/${targetId}/active`, { active: false });
+ok((await t2('GET', '/auth/me')).j === null, 'disabling a user signs them out');
+await admin('PATCH', `/admin/users/${targetId}/active`, { active: true });
+
+// ---- Free fixes: Q&A approval ----
+const qa = (await cust('POST', `/products/${P('Beef Brisket').id}/questions`, { text: 'How long should I smoke it?' })).j;
+r = await st('POST', `/admin/questions/${qa.id}/answer`, { text: 'About 8 to 10 hours at 110 degrees.' });
+ok(r.s === 201 && r.j.approved === false, 'staff answers wait for approval');
+ok(!(await anon('GET', `/products/${P('Beef Brisket').id}/qa`)).j.find(x => x.id === qa.id).answers.length, 'unapproved answer is hidden');
+await admin('PATCH', `/admin/answers/${r.j.id}`, { approved: true });
+ok((await anon('GET', `/products/${P('Beef Brisket').id}/qa`)).j.find(x => x.id === qa.id).answers.length === 1, 'approved answer is shown');
+
+// ---- Free fixes: ORDER AGAIN adds what is in stock ----
+const rb = (await cust('GET', `/products/${P('Beef Short Ribs').id}`)).j;
+const ro = await placeAndPay('COLLECTION', [{ productId: rb.id, quantity: 3 }]);
+await setStatus(ro.id, 'READY_FOR_COLLECTION'); await setStatus(ro.id, 'COLLECTED');
+await admin('PATCH', `/admin/products/${rb.id}`, { quantity: 1.5 });
+r = await cust('POST', `/orders/${ro.id}/reorder`);
+const ri = r.j.items[0];
+ok(ri.available && ri.partial && ri.quantity === 1.5 && ri.wanted === 3, 'order again adds the 1.5 kg in stock instead of skipping', ri.reason);
+
+// ---- Free fixes: cart saved to the account ----
+ok((await s1('GET', '/cart')).s === 401, 'cart needs sign-in');
+r = await cust('PUT', '/cart', { storeSlug: 'meat-market', fulfilment: 'COLLECTION', zoneId: null, lines: [{ productId: P('Braai Pack').id, quantity: 2 }, { productId: 'not-a-product', quantity: 1 }] });
+ok(r.s === 200 && r.j.lines.length === 1 && r.j.fulfilment === 'COLLECTION', 'cart saved; unknown products dropped');
+const otherDevice = client(); await otherDevice('POST', '/auth/login', { email, password: 'new-password-9' });
+ok((await otherDevice('GET', '/cart')).j?.lines?.[0]?.quantity === 2, 'cart follows the customer to another device');
+
+// ---- Free fixes: Vallerie basic mode (no AI key) ----
+const ask = q => cust('POST', '/ai/chat', { message: q, history: [] });
+r = await ask('I am having a braai for 8 people. What would you recommend?');
+ok(r.s === 200 && r.j.mode === 'basic' && r.j.products.length >= 2 && /for 8/.test(r.j.reply) && /R\d/.test(r.j.reply), 'basic mode plans a braai for 8 from the catalogue', r.j.products?.map(p => p.name).join(', '));
+r = await ask('Show me chicken products');
+ok(r.j.products.length > 0 && r.j.products.every(p => p.category.name === 'Chicken'), 'basic mode lists chicken products');
+r = await ask('What is available for under R300?');
+ok(r.j.products.length > 0 && r.j.products.every(p => Number(p.price) <= 300), 'basic mode lists items under R300');
+r = await ask('How does delivery work?');
+ok(/Zone 1/.test(r.j.reply) && /free/i.test(r.j.reply), 'basic mode explains delivery from the zones');
+r = await ask('Where is my order?');
+ok(/#GV\d{5}/.test(r.j.reply), 'basic mode reports the latest order', r.j.reply.slice(0, 80));
+
+// ---- Free fixes: catalogue import from CSV ----
+const csv = (text, dry) => { const fd = new FormData(); fd.append('file', new Blob([text], { type: 'text/csv' }), 'products.csv'); return fetch(`${BASE}/admin/products/import${dry ? '?dryRun=1' : ''}`, { method: 'POST', headers: { Cookie: adminCookie }, body: fd }).then(async x => ({ s: x.status, j: await x.json() })); };
+const sheet = 'name,category,price,unit,stock,description\n"Russians, smoked",Braai,"R12,99",each,40,Specials board\nBeef Mince,Beef,104.99,kg,20,\nBroken Row,Beef,abc,kg,1,\n';
+r = await csv(sheet, true);
+ok(r.s === 200 && r.j.summary.create === 1 && r.j.summary.update === 1 && r.j.summary.errors === 1, 'import preview: 1 new, 1 update, 1 error', JSON.stringify(r.j.summary));
+ok(r.j.results.find(x => x.name === 'Beef Mince')?.changes?.some(c => /104\.99/.test(c)), 'preview shows the price change');
+ok((await csv(sheet, false)).s === 400, 'import refuses a file with errors');
+r = await csv(sheet.replace('Broken Row,Beef,abc,kg,1,\n', ''), false);
+ok(r.s === 200 && (await anon('GET', '/products?q=russians')).j.some(p => p.name === 'Russians, smoked' && Number(p.price) === 12.99) && Number((await anon('GET', `/products/${P('Beef Mince').id}`)).j.price) === 104.99, 'import creates and updates products');
+r = await csv('name;category;price\nPap;Sides;15\n', true);
+ok(r.s === 200 && r.j.summary.create === 1, 'semicolon CSV from Excel accepted');
+
+// ---- Free fixes: delivery zones by suburb (kept last: it changes zone rules) ----
+r = await admin('POST', `/admin/stores/${meatStore.id}/zones`, { name: 'Zone 4 – Test suburbs', fee: 80, suburbs: ['Test Park', 'Sample Ridge'] });
+const z4 = r.j;
+ok(r.s === 201 && z4.suburbs.length === 2, 'admin creates a delivery zone with suburbs');
+ok((await admin('POST', `/admin/stores/${meatStore.id}/zones`, { name: 'Clash', fee: 1, suburbs: ['test park'] })).s === 409, 'a suburb can belong to only one zone');
+const zoneOrder = (zoneId, area) => cust('POST', '/orders', { storeSlug: 'meat-market', fulfilment: 'DELIVERY', zoneId, address: { ...address, area }, contact, items: [{ productId: P('Braai Pack').id, quantity: 1 }] });
+r = await zoneOrder(zone1.id, 'Test Park');
+ok(r.s === 400 && /Zone 4/.test(r.j.error), 'wrong zone for the suburb is corrected', r.j.error);
+r = await zoneOrder(z4.id, 'Nowhere Village');
+ok(r.s === 400 && /don't deliver/.test(r.j.error), 'unknown suburb is refused', r.j.error);
+r = await zoneOrder(z4.id, '  sample   RIDGE ');
+ok(r.s === 201 && Number(r.j.deliveryFee) === 80, 'right zone for the suburb is accepted (case-insensitive)');
+await admin('PUT', `/admin/zones/${z4.id}`, { active: false, suburbs: [] });
+await pdb.$disconnect();
 
 console.log(`\n${pass} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

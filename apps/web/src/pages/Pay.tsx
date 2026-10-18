@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CreditCard, Landmark, Lock, PackageX, ShieldCheck } from 'lucide-react';
 import { api, ApiError, itemQty, type OrderDetail, type PayResponse } from '../lib/api';
 import { usePaymentConfig } from '../lib/queries';
-import { rand } from '../lib/format';
+import { rand, time } from '../lib/format';
 import { CheckoutSteps } from '../components/CheckoutSteps';
 import { Button, EmptyState, ErrorState, LinkButton, PageHeader, Skeleton } from '../components/ui';
 
@@ -39,6 +39,8 @@ export default function Pay() {
     return <div className="container-page py-10"><ErrorState message={order.error.message} onRetry={() => order.refetch()} /></div>;
   }
   const o = order.data;
+  const unpaidMinutes = config.data?.unpaidMinutes;
+  const deadline = unpaidMinutes ? new Date(+new Date(o.createdAt) + unpaidMinutes * 60_000) : null;
   if (o.payment?.status === 'PAID') return <Navigate to={`/orders/${o.id}`} replace />;
   if (o.status === 'CANCELLED') return <div className="container-page py-10"><EmptyState icon={PackageX} title="This order was cancelled">It can no longer be paid.</EmptyState></div>;
 
@@ -53,6 +55,7 @@ export default function Pay() {
           </div>
           <div className="space-y-5 p-5 sm:p-6">
             <h2 id="pay-h" className="text-xl font-extrabold">Choose how to pay</h2>
+            {deadline && <p className="text-sm text-ink-2" data-testid="pay-deadline">Please pay by <span className="font-semibold text-ink">{time(deadline.toISOString())}</span>. Unpaid orders are cancelled after {unpaidMinutes} minutes so the stock goes back on sale.</p>}
             <fieldset className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <legend className="sr-only">Payment method</legend>
               {METHODS.map(({ v, label, sub, icon: Icon }) => (

@@ -13,12 +13,14 @@ import { lineTotal, qtyLabel, rand } from '../lib/format';
 import { CheckoutSteps } from '../components/CheckoutSteps';
 import { Field } from '../components/Field';
 import { Button, DemoTag, EmptyState, ErrorState, LinkButton, PageHeader, Skeleton } from '../components/ui';
+import { ConsentCheckbox } from './Legal';
 
 type Contact = { firstName: string; lastName: string; phone: string; email: string };
 type Address = { street: string; area: string; city: string; province: string; postalCode: string };
 type SavedAddress = Address & { id: string; label: string | null };
 const DRAFT_KEY = 'gv-checkout-draft';
 const emptyAddress: Address = { street: '', area: '', city: 'Johannesburg', province: 'Gauteng', postalCode: '' };
+const normSuburb = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
 function loadDraft(): { contact?: Contact; address?: Address } {
   try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || '{}'); } catch { return {}; }
@@ -74,6 +76,8 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
   const [address, setAddress] = useState<Address>(draft.address ?? emptyAddress);
   const [ageOk, setAgeOk] = useState(false);
   const [saveAddress, setSaveAddress] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [consentTouched, setConsentTouched] = useState(false);
   const saved = useQuery({ queryKey: ['addresses'], queryFn: () => api<SavedAddress[]>('/account/addresses'), enabled: !guest });
   const pickedSaved = saved.data?.find(a => (['street', 'area', 'city', 'province', 'postalCode'] as const).every(k => a[k] === address[k]));
   useEffect(() => { try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ contact, address })); } catch { /* ignore */ } }, [contact, address]);
@@ -88,6 +92,7 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
       items: cart.lines.map(l => ({ productId: l.productId, quantity: l.quantity })),
       ...(store.data?.ageRestricted ? { ageConfirmed: ageOk } : {}),
       ...(!guest && delivery && saveAddress && !pickedSaved ? { saveAddress: true } : {}),
+      ...(guest ? { acceptPrivacy: consent } : {}),
     } }),
     onSuccess: order => {
       if (order.guestToken) rememberGuestOrder({ id: order.id, orderNumber: order.orderNumber, token: order.guestToken });
@@ -104,7 +109,10 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
   const byId = new Map(products.data.map(p => [p.id, p]));
   const rows = cart.lines.map(l => ({ l, p: byId.get(l.productId) })).filter((r): r is { l: typeof r.l; p: Product } => !!r.p);
   const cartProblem = rows.length !== cart.lines.length || rows.some(r => available(r.p) < r.l.quantity);
-  const zone = store.data.zones.find(z => z.id === cart.zoneId);
+  // When the store lists suburbs per zone, the zone (and fee) comes from the customer's suburb.
+  const bySuburb = store.data.zones.some(z => z.suburbs?.length);
+  const suburbZone = bySuburb && address.area.trim() ? store.data.zones.find(z => z.suburbs?.some(x => normSuburb(x) === normSuburb(address.area))) : undefined;
+  const zone = bySuburb ? suburbZone : store.data.zones.find(z => z.id === cart.zoneId);
   const subtotal = Math.round(rows.reduce((s, r) => s + lineTotal(r.p.price, r.l.quantity), 0) * 100) / 100;
   const fee = delivery ? Number(zone?.fee ?? 0) : 0;
 
@@ -119,7 +127,8 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
   if (address.city.trim().length < 2) addressErrors.city = 'Enter your city';
   if (!PROVINCES.includes(address.province as (typeof PROVINCES)[number])) addressErrors.province = 'Choose a province';
   if (!/^\d{4}$/.test(address.postalCode.trim())) addressErrors.postalCode = 'Use a 4-digit postal code';
-  const fulfilmentError = delivery && !zone ? 'Choose your delivery zone' : undefined;
+  if (bySuburb && !addressErrors.area && !suburbZone) addressErrors.area = `We don't deliver to ${address.area.trim()} yet. Check the spelling, or go back and choose collection.`;
+  const fulfilmentError = delivery && !bySuburb && !zone ? 'Choose your delivery zone' : undefined;
 
   const ageRequired = !!store.data.ageRestricted, minAge = store.data.config.ageVerification?.minimumAge ?? 18;
   const stepValid = [Object.keys(contactErrors).length === 0 && (!ageRequired || ageOk), !fulfilmentError, !delivery || Object.keys(addressErrors).length === 0];
@@ -127,6 +136,7 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
     e?.preventDefault();
     setTouched(t => ({ ...t, [step]: true }));
     if (!stepValid[step]) { setTimeout(() => document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(), 0); return; }
+    if (step === 2 && bySuburb && suburbZone) cart.setZone(suburbZone.id); // the suburb decides the zone the server checks
     setStep(s => (s === 1 && !delivery ? 3 : s + 1));
   };
   const back = () => setStep(s => (s === 3 && !delivery ? 1 : s - 1));
@@ -184,7 +194,16 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
                 ))}
               </fieldset>
               {store.data.zones.length === 0 && <p className="text-sm text-ink-2">{store.data.name} offers collection from the store only for now.</p>}
-              {delivery && (
+              {delivery && bySuburb && (
+                <div className="rounded-2xl bg-surface-2 p-4 text-sm text-ink-2">
+                  <p>Your delivery zone and fee are set from your suburb on the next step.</p>
+                  <details className="mt-2">
+                    <summary className="cursor-pointer font-semibold text-ink">Where we deliver</summary>
+                    <ul className="mt-2 space-y-1">{store.data.zones.filter(z => z.suburbs?.length).map(z => <li key={z.id}><span className="font-semibold">{z.name} · {rand(z.fee)}:</span> {z.suburbs!.join(', ')}</li>)}</ul>
+                  </details>
+                </div>
+              )}
+              {delivery && !bySuburb && (
                 <div>
                   <label htmlFor="co-zone" className="mb-1 flex items-center gap-2 text-sm font-semibold">Delivery zone <DemoTag /></label>
                   <select id="co-zone" className="field" value={cart.zoneId ?? ''} onChange={e => cart.setZone(e.target.value || null)} aria-invalid={!!(touched[1] && fulfilmentError)} aria-describedby="co-zone-help">
@@ -217,7 +236,8 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
               )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field id="co-street" label="Street address" className="sm:col-span-2" autoComplete="address-line1" value={address.street} onChange={setA('street')} error={err(addressErrors, 'street')} />
-                <Field id="co-area" label="Suburb / area" autoComplete="address-level3" value={address.area} onChange={setA('area')} error={err(addressErrors, 'area')} />
+                <Field id="co-area" label="Suburb / area" autoComplete="address-level3" value={address.area} onChange={setA('area')} error={err(addressErrors, 'area')}
+                  hint={bySuburb && suburbZone ? `${suburbZone.name} · delivery ${rand(suburbZone.fee)}` : undefined} />
                 <Field id="co-city" label="City" autoComplete="address-level2" value={address.city} onChange={setA('city')} error={err(addressErrors, 'city')} />
                 <div>
                   <label htmlFor="co-province" className="mb-1 block text-sm font-semibold">Province</label>
@@ -249,6 +269,7 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
                   </li>
                 ))}
               </ul>
+              {guest && <ConsentCheckbox id="co-consent" checked={consent} onChange={setConsent} error={consentTouched && !consent ? 'Please accept the privacy policy and terms to place your order' : undefined} />}
               {cartProblem && <p className="rounded-xl bg-warn-bg p-3 text-sm font-semibold text-warn-text" role="alert">Some items are no longer available in that quantity. <Link to="/cart" className="underline">Update your cart</Link>.</p>}
               {place.isError && (
                 <p className="rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text" role="alert">
@@ -257,7 +278,7 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
               )}
               <div className="flex flex-wrap-reverse items-center justify-between gap-3 border-t border-line pt-5">
                 <Button type="button" variant="ghost" onClick={back}><ArrowLeft className="size-4" aria-hidden /> Back</Button>
-                <Button size="lg" onClick={() => place.mutate()} busy={place.isPending} disabled={cartProblem}>Place order & pay <ArrowRight className="size-5" aria-hidden /></Button>
+                <Button size="lg" onClick={() => { setConsentTouched(true); if (!guest || consent) place.mutate(); }} busy={place.isPending} disabled={cartProblem}>Place order & pay <ArrowRight className="size-5" aria-hidden /></Button>
               </div>
               <p className="text-sm text-ink-3">Placing your order reserves the stock. You'll pay on the next screen.</p>
             </section>

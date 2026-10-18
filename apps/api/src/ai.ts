@@ -53,6 +53,9 @@ async function askAnthropic(system: string, history: Msg[], message: string): Pr
   return r.content.flatMap(b => (b.type === 'text' ? [b.text] : [])).join('').trim();
 }
 
+/** Whether a model is configured. Without one, Vallerie answers in basic mode (see basicAssistant.ts). */
+export const aiConfigured = () => ((process.env.AI_PROVIDER || 'anthropic') === 'xai' ? !!(process.env.XAI_API_KEY && process.env.XAI_MODEL) : !!process.env.ANTHROPIC_API_KEY);
+
 export async function askVallerie(context: string, history: Msg[], message: string): Promise<string> {
   const system = SYSTEM_PROMPT + '\n\nCONTEXT:\n' + context;
   const h = trimHistory(history);
@@ -76,5 +79,9 @@ export function mentionedProducts(reply: string, prods: CatalogueProduct[]) {
     const at = text.indexOf(p.name.toLowerCase()); if (at < 0) continue;
     found.push({ p, at }); text = text.split(p.name.toLowerCase()).join(' '.repeat(p.name.length));
   }
-  return found.sort((a, b) => a.at - b.at).slice(0, 6).map(({ p }) => ({ id: p.id, name: p.name, price: p.price, soldByWeight: p.soldByWeight, category: { id: p.category.id, name: p.category.name }, imageUrl: p.imageUrl, inventory: p.inventory && { quantity: p.inventory.quantity, lowThreshold: p.inventory.lowThreshold } }));
+  return found.sort((a, b) => a.at - b.at).slice(0, 6).map(({ p }) => productCard(p));
+}
+// The fields the chat widget needs to show a product with an Add button.
+export function productCard(p: CatalogueProduct) {
+  return { id: p.id, name: p.name, price: p.price, soldByWeight: p.soldByWeight, category: { id: p.category.id, name: p.category.name }, imageUrl: p.imageUrl, inventory: p.inventory && { quantity: p.inventory.quantity, lowThreshold: p.inventory.lowThreshold } };
 }

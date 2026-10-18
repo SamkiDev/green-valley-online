@@ -7,3 +7,7 @@ dist/
 .DS_Store
 coverage/
 apps/api/uploads/
+
+# Playwright
+apps/web/test-results/
+apps/web/playwright-report/

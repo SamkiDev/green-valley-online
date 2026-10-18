@@ -1,8 +1,9 @@
 import { NavLink, Outlet } from 'react-router';
-import { BarChart3, Boxes, ClipboardList, LayoutDashboard, MessageSquareText, Package, Star, Store, Truck, Users, Warehouse } from 'lucide-react';
+import { BarChart3, Boxes, ClipboardList, LayoutDashboard, MessageSquareText, Package, Star, Store, Truck, UserCog, Users, Warehouse } from 'lucide-react';
 import { useMe } from '../../lib/auth';
 import { Suspense } from 'react';
 import { Skeleton } from '../../components/ui';
+import { NewOrderAlerts } from './NewOrderAlerts';
 
 const SECTIONS = [
   { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
@@ -14,6 +15,7 @@ const SECTIONS = [
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/admin/customers', label: 'Customers', icon: Users, adminOnly: true },
   { to: '/admin/drivers', label: 'Drivers', icon: Truck, adminOnly: true },
+  { to: '/admin/staff', label: 'Store staff', icon: UserCog, adminOnly: true },
   { to: '/admin/stores', label: 'Stores & settings', icon: Store, adminOnly: true },
   { to: '/admin/wholesale', label: 'Bulk quotes', icon: Warehouse, adminOnly: true },
 ];
@@ -33,6 +35,7 @@ export default function AdminLayout() {
             </li>
           ))}
         </ul>
+        <NewOrderAlerts />
       </nav>
       <div className="min-w-0"><Suspense fallback={<Skeleton className="h-64" />}><Outlet /></Suspense></div>
     </div>

@@ -38,6 +38,18 @@ Port 5180 is used because 5173 is often taken by other Vite projects. If npm eve
 
 `npm run db:reset` (in `apps/api`) wipes and reseeds the local demo database, so the next order is **#GV10284** again.
 
+## Tests
+
+| Command | What it checks |
+|---|---|
+| `npm run test:e2e -w apps/api` | 147 API checks: ordering, payments, roles, sessions, zones, imports, Vallerie basic mode (API must be running, fresh DB) |
+| `npm run test:paystack -w apps/api` | the Paystack flow against a mock Paystack (starts its own API on :4001) |
+| `npm run test:browser -w apps/web` | Playwright: a real Chromium (desktop and phone size) shops, checks out, registers, uses Vallerie and the admin pages |
+
+First time only: `npx playwright install chromium` in `apps/web`. The tests place orders and add accounts, so run
+`npm run db:reset` in `apps/api` before showing the demo. GitHub Actions (`.github/workflows/ci.yml`) runs all of
+this, plus type checks and builds, on every push.
+
 ## Demo logins (DEMO ONLY)
 
 Password `demo-password-1` (or `SEED_PASSWORD` in `.env`):
@@ -60,7 +72,8 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 
 - `AI_PROVIDER=anthropic` (default, model `ANTHROPIC_MODEL`, default `claude-opus-5-5`) or `AI_PROVIDER=xai` (`XAI_API_KEY`, `XAI_MODEL`).
 - Keys are server-side env vars only. Rate limited (15/min) with a timeout (`AI_TIMEOUT_MS`).
-- With no key, or if the provider fails, the route returns 503 with *"Vallerie is temporarily unavailable. You can continue shopping normally."*
+- **Basic mode (no key):** Vallerie still answers the common questions straight from the database: braai planning for a number of people, products by category, items under a budget, how delivery works, and the customer's latest order. The widget shows *Basic mode*. No AI cost, nothing leaves the server.
+- If a key is set but the provider fails, the route returns 503 with *"Vallerie is temporarily unavailable. You can continue shopping normally."*
 - The reply also carries the catalogue products it names, looked up in the database (price and stock from the DB, never the model), so the widget shows real Add buttons.
 
 **To switch Vallerie on:** put your key in `apps/api/.env` yourself (`ANTHROPIC_API_KEY=...`, or `AI_PROVIDER=xai` with `XAI_API_KEY` and `XAI_MODEL`) and restart the API. Never commit it; `.env` is git-ignored.
@@ -69,6 +82,26 @@ Activating a store is a data change (`Store.status = 'ACTIVE'`), not code. Hours
 
 - **Guests** can check out without an account. Each guest order gets an access token (an HMAC of the order id, nothing stored) that this device keeps; anyone can also find an order on *Track Order* with its number and the checkout email (rate limited).
 - **Age-restricted stores** (Bottle Liquors): the shop and product pages ask for a date of birth (self-declared, not saved), checkout needs an explicit confirmation that the API enforces and records (`Order.ageConfirmedAt`), and drivers see a CHECK ID badge. The minimum age and any compliance text come from the store settings. Bottle Liquors has no delivery zones yet, so it is collection-only until an admin adds zones.
+
+## Delivery zones by suburb
+
+In *Admin > Stores & settings* each delivery zone can list the suburbs it covers (a suburb belongs to one zone only). When any zone has suburbs, checkout picks the zone and fee from the customer's suburb and refuses addresses outside every list; the API checks the same rule. Leave all lists empty to let customers choose a zone themselves.
+
+## Unpaid orders
+
+Placing an order reserves its stock. Orders still unpaid after `UNPAID_ORDER_MINUTES` (default 30) are cancelled automatically and their stock goes back on sale (checked every minute; Paystack payments are verified with Paystack first). The payment page shows the deadline, and admins can run the check at once with *Release unpaid orders*.
+
+## Accounts, staff and passwords
+
+- Registration and guest checkout require accepting the privacy policy and terms (`/privacy`, `/terms`). Both pages are **drafts for legal review**: the [bracketed] details must be completed by the owners before launch.
+- There is no email service yet, so a forgotten password is reset by an admin (*Customers*, *Drivers* or *Store staff* > *Reset password*): the admin sees a one-time temporary password to share privately, the user is signed out everywhere and must choose a new password at the next sign-in. New staff accounts work the same way.
+- Changing a password signs out all other devices; *Sign out everywhere* on the account page signs out all of them. Disabling a user signs them out at once.
+- Store staff answers to customer questions wait for an admin's approval before customers or Vallerie see them.
+- A signed-in customer's cart is saved to their account, so it follows them from phone to laptop. Signing out empties the cart on that device.
+
+## Catalogue import (CSV)
+
+*Admin > Products > Import from a spreadsheet* loads a price list saved as CSV from Excel (comma or semicolon). Required columns: `name, category, price`; optional `unit` (kg or each), `stock`, `description`, `available`, `store` and `image_url`. The preview shows what will be added, what changes on existing products (matched by name) and any row errors; nothing is saved until you confirm, and a file with errors is refused. A template can be downloaded from the same panel.
 
 ## Product photos
 
@@ -92,7 +125,7 @@ While a delivery is out for delivery or arrived, the driver portal shares the ph
 ## Portals
 
 - **Driver** `/driver`: sign in as a driver. Today's deliveries with ACCEPT DELIVERY, START DELIVERY, ARRIVED, DELIVERED (DELIVERED asks for a second tap). Each action sends the status the driver saw, so a double tap can't skip a step; the customer's tracking page updates within seconds.
-- **Admin** `/admin`: sign in as admin or store staff. Staff only see their own store and can't open customers, drivers, store settings or bulk quotes. Cancelling an order returns its stock and marks a demo payment refunded. Opening a store online is a button in *Stores & settings*.
+- **Admin** `/admin`: sign in as admin or store staff. Staff only see their own store and can't open customers, drivers, store settings or bulk quotes. Cancelling an order returns its stock and marks a demo payment refunded. Opening a store online is a button in *Stores & settings*. A pop-up, a flashing tab title and an optional chime announce each new paid order while the dashboard is open.
 
 ## API
 
@@ -104,7 +137,8 @@ While a delivery is out for delivery or arrived, the driver portal shares the ph
 | Payments | `GET /api/payments/config`, `POST /api/payments/:orderId/pay` `{ method: CARD \| EFT }`, `POST /payments/:orderId/verify`, `POST /payments/webhooks/paystack` |
 | Deliveries | `GET /api/deliveries/mine`, `POST /deliveries/:id/advance` (accept → start → arrived → delivered), `POST /deliveries/:id/location` |
 | Photos | `POST /api/admin/products/:id/image` (field `image`), `DELETE /admin/products/:id/image`, `POST /admin/products/images/bulk` (field `images`) |
-| Admin | `/api/admin/stats`, `orders`, `orders/:id/status`, `products`, `inventory`, `wholesale`, `questions/:id/answer`, `zones/:id`, `drivers`, `users/:id/active` |
+| Admin | `/api/admin/stats`, `orders`, `orders/:id/status`, `orders/release-unpaid`, `products`, `products/import[?dryRun=1]`, `inventory`, `wholesale`, `questions/:id/answer`, `answers/:id`, `stores/:id/zones`, `zones/:id`, `drivers`, `staff`, `users/:id/active`, `users/:id/temporary-password` |
+| Account | `/api/account/profile`, `password`, `logout-all`, `addresses`, `favourites`; `GET`/`PUT /api/cart` |
 | Other | `POST /api/wholesale`, `POST /api/products/:id/questions`, `POST /api/ai/chat` |
 
 ## Stages
@@ -115,3 +149,4 @@ While a delivery is out for delivery or arrived, the driver portal shares the ph
 4. ✅ Driver portal (`/driver`) and admin dashboard (`/admin`): orders, driver assignment, products, inventory, Q&A, analytics; admin-only customers, drivers, stores & settings, bulk quotes
 5. ✅ Account (profile, password, saved addresses, favourites, ORDER AGAIN), store and product reviews (completed orders only), guest checkout with track-by-number-and-email, multi-store cart, liquor age verification
 6. ✅ Product photos (camera, file and bulk upload; local storage behind an interface), Paystack behind `PaymentProvider` (tested against a mock), GPS driver sharing with a live OpenStreetMap map
+7. ✅ Free fixes before the owners' demo: unpaid orders release stock, suburb-based zones, staff accounts and password resets, session revocation, Q&A approval, POPIA consent with draft privacy/terms pages, new-order alerts, Vallerie basic mode, CSV catalogue import, cart saved to the account, Playwright browser tests and GitHub Actions CI

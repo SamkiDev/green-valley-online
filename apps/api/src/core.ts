@@ -1,11 +1,12 @@
 // Shared helpers for all route modules.
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
+import jwt from 'jsonwebtoken';
 import { PrismaClient, Role, OrderStatus, Prisma } from '@prisma/client';
 
 export const db = new PrismaClient();
 
-export type U = { id: string; role: Role; name: string; email: string; phone: string | null; storeId?: string; customerId?: string; driverId?: string };
+export type U = { id: string; role: Role; name: string; email: string; phone: string | null; mustChangePassword: boolean; storeId?: string; customerId?: string; driverId?: string };
 export type Tx = Prisma.TransactionClient;
 
 export const h = (fn: (req: Request, res: Response) => Promise<any>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
@@ -27,3 +28,9 @@ export const setOrderStatus = (tx: Tx, orderId: string, status: OrderStatus, act
 
 // South African numbers: 0XX XXX XXXX or +27 XX XXX XXXX (spaces and dashes allowed).
 export const saPhone = z.string().trim().refine(v => /^(\+27|0)\d{9}$/.test(v.replace(/[\s-]/g, '')), 'Enter a valid South African phone number');
+
+// ---- sessions: a signed cookie carrying the user's tokenVersion; bumping the version signs them out everywhere ----
+export const SECRET = process.env.JWT_SECRET ?? '';
+if (SECRET.length < 24) throw new Error('Set a long JWT_SECRET in .env');
+export const setSession = (res: Response, id: string, v: number) =>
+  res.cookie('gvo', jwt.sign({ sub: id, v }, SECRET, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 864e5 });

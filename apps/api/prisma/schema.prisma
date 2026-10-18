@@ -52,6 +52,9 @@ model User {
   role Role
   phone String?
   active Boolean @default(true)
+  tokenVersion Int @default(0) // bump to sign the user out everywhere
+  mustChangePassword Boolean @default(false) // set by an admin-issued temporary password
+  privacyAcceptedAt DateTime? // POPIA consent
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   customer Customer?
@@ -65,7 +68,7 @@ model Customer {
   user User @relation(fields: [userId], references: [id])
   addresses Address[]
   orders Order[]
-  carts Cart[]
+  cart Cart?
   favourites Favourite[]
   reviews Review[]
   questions Question[]
@@ -112,6 +115,8 @@ model DeliveryZone {
   name String
   fee Decimal @db.Decimal(10, 2)
   active Boolean @default(true)
+  suburbs String[] @default([]) // areas this zone covers; empty = not checked
+  createdAt DateTime @default(now())
 }
 model Category {
   id String @id @default(cuid())
@@ -151,10 +156,13 @@ model Inventory {
   lowThreshold Decimal @default(5) @db.Decimal(10, 2)
   updatedAt DateTime @updatedAt
 }
-model Cart {
+model Cart { // a signed-in customer's cart, so it follows them between devices
   id String @id @default(cuid())
-  customerId String
+  customerId String @unique
   customer Customer @relation(fields: [customerId], references: [id])
+  storeSlug String @default("meat-market")
+  fulfilment Fulfilment @default(DELIVERY)
+  zoneId String?
   items CartItem[]
   updatedAt DateTime @updatedAt
 }
@@ -192,7 +200,8 @@ model Order {
   contactName String?
   contactPhone String?
   contactEmail String?
-  ageConfirmedAt DateTime? // set when the customer confirmed their age for an age-restricted store
+  ageConfirmedAt DateTime?
+  privacyAcceptedAt DateTime? // POPIA consent given at checkout (guests) // set when the customer confirmed their age for an age-restricted store
   addressId String?
   address Address? @relation(fields: [addressId], references: [id])
   addressText String?

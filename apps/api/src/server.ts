@@ -3,25 +3,27 @@ import express, { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet'; import cookieParser from 'cookie-parser'; import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs'; import jwt from 'jsonwebtoken'; import { z } from 'zod';
 import { Prisma } from '@prisma/client';
-import { db, h, me, need, num, orderNo, type U } from './core';
+import { db, h, me, need, num, orderNo, SECRET, setSession, type U } from './core';
 import { driverRoutes } from './routes/driver';
 import { adminRoutes } from './routes/admin';
-import { orderRoutes, paymentRoutes } from './routes/orders';
+import { orderRoutes, paymentRoutes, sweepUnpaidOrders } from './routes/orders';
+import { cartRoutes } from './routes/cart';
 import { accountRoutes } from './routes/account';
 import { reviewRoutes } from './routes/reviews';
-import { askVallerie, mentionedProducts } from './ai';
+import { aiConfigured, askVallerie, mentionedProducts, productCard } from './ai';
+import { basicAnswer } from './basicAssistant';
 import { UPLOAD_ROOT, UPLOAD_URL } from './storage';
 
-const SECRET = process.env.JWT_SECRET; if (!SECRET || SECRET.length < 24) throw new Error('Set a long JWT_SECRET in .env');
 const app = express();
-app.set('trust proxy', 'loopback'); // the Vite dev proxy forwards from localhost; needed for per-client rate limits
+// Which proxies to trust for the client IP (rate limits). Dev: the Vite proxy on localhost. Behind a host's proxy set TRUST_PROXY (e.g. 1).
+app.set('trust proxy', /^d+$/.test(process.env.TRUST_PROXY ?? '') ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY || 'loopback');
 // rawBody is kept for webhook signature checks (Paystack signs the exact bytes it sends).
 app.use(helmet(), express.json({ limit: '50kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } }), cookieParser());
 app.use((req, res, next) => { // minimal CORS for the Vite frontend, with credentials
   const o = process.env.WEB_ORIGIN; if (o && req.headers.origin === o) { res.set({ 'Access-Control-Allow-Origin': o, 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Allow-Headers': 'Content-Type, X-Order-Token', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE' }); }
   req.method === 'OPTIONS' ? res.sendStatus(204) : next();
 });
-app.use('/api', rateLimit({ windowMs: 60_000, limit: 200 }));
+app.use('/api', rateLimit({ windowMs: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MINUTE) || 300 }));
 // Uploaded product photos. File names are random UUIDs, so they can be cached for a long time.
 app.use(UPLOAD_URL, express.static(UPLOAD_ROOT, { maxAge: '30d', immutable: true, index: false, fallthrough: false }));
 
@@ -29,32 +31,32 @@ app.use(UPLOAD_URL, express.static(UPLOAD_ROOT, { maxAge: '30d', immutable: true
 async function load(req: Request, res: Response, next: NextFunction) {
   const t = req.cookies?.gvo; if (!t) return next();
   try {
-    const { sub } = jwt.verify(t, SECRET!) as { sub: string };
+    const { sub, v } = jwt.verify(t, SECRET) as { sub: string; v?: number };
     const u = await db.user.findUnique({ where: { id: sub }, include: { customer: true, driver: true, staff: true } });
-    if (u?.active) res.locals.user = { id: u.id, role: u.role, name: u.name, email: u.email, phone: u.phone, storeId: u.staff?.storeId, customerId: u.customer?.id, driverId: u.driver?.id } as U;
+    if (u?.active && u.tokenVersion === (v ?? 0)) res.locals.user = { id: u.id, role: u.role, name: u.name, email: u.email, phone: u.phone, mustChangePassword: u.mustChangePassword, storeId: u.staff?.storeId, customerId: u.customer?.id, driverId: u.driver?.id } as U;
   } catch { /* invalid token = anonymous */ }
   next();
 }
 app.use(load);
-const setSession = (res: Response, id: string) => res.cookie('gvo', jwt.sign({ sub: id }, SECRET!, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 864e5 });
 const authLimit = rateLimit({ windowMs: 15 * 60_000, limit: 30 });
 
 const A = express.Router();
 A.post('/register', authLimit, h(async (req, res) => {
-  const b = z.object({ email: z.string().email(), password: z.string().min(8).max(100), name: z.string().min(1).max(80), phone: z.string().max(20).optional() }).parse(req.body);
+  const b = z.object({ email: z.string().email(), password: z.string().min(8).max(100), name: z.string().min(1).max(80), phone: z.string().max(20).optional(),
+    acceptPrivacy: z.literal(true, { errorMap: () => ({ message: 'Please accept the privacy policy and terms' }) }) }).parse(req.body);
   if (await db.user.findUnique({ where: { email: b.email.toLowerCase() } })) return res.status(409).json({ error: 'Email already registered' });
-  const { password, ...profile } = b; // never pass the plaintext password to the database layer
-  const u = await db.user.create({ data: { ...profile, email: b.email.toLowerCase(), passwordHash: await bcrypt.hash(password, 12), role: 'CUSTOMER', customer: { create: {} } } });
-  setSession(res, u.id); res.status(201).json({ id: u.id, name: u.name, role: u.role });
+  const { password, acceptPrivacy: _consent, ...profile } = b; // never pass the plaintext password to the database layer
+  const u = await db.user.create({ data: { ...profile, email: b.email.toLowerCase(), passwordHash: await bcrypt.hash(password, 12), role: 'CUSTOMER', privacyAcceptedAt: new Date(), customer: { create: {} } } });
+  setSession(res, u.id, u.tokenVersion); res.status(201).json({ id: u.id, name: u.name, role: u.role });
 }));
 A.post('/login', authLimit, h(async (req, res) => {
   const b = z.object({ email: z.string().email(), password: z.string().max(100) }).parse(req.body);
   const u = await db.user.findUnique({ where: { email: b.email.toLowerCase() } });
   if (!u || !u.active || !(await bcrypt.compare(b.password, u.passwordHash))) return res.status(401).json({ error: 'Invalid email or password' });
-  setSession(res, u.id); res.json({ id: u.id, name: u.name, role: u.role });
+  setSession(res, u.id, u.tokenVersion); res.json({ id: u.id, name: u.name, role: u.role, mustChangePassword: u.mustChangePassword });
 }));
 A.post('/logout', (_, res) => { res.clearCookie('gvo'); res.json({ ok: true }); });
-A.get('/me', (_, res) => { const u = res.locals.user as U | undefined; res.json(u ? { id: u.id, name: u.name, role: u.role, email: u.email, phone: u.phone } : null); });
+A.get('/me', (_, res) => { const u = res.locals.user as U | undefined; res.json(u ? { id: u.id, name: u.name, role: u.role, email: u.email, phone: u.phone, mustChangePassword: u.mustChangePassword } : null); });
 app.use('/api/auth', A);
 
 // ---- public catalogue ----
@@ -62,7 +64,7 @@ app.use('/api/auth', A);
 const storeSelect = { id: true, slug: true, name: true, category: true, description: true, status: true, ageRestricted: true, config: true } satisfies Prisma.StoreSelect;
 app.get('/api/stores', h(async (_, res) => res.json(await db.store.findMany({ select: storeSelect, orderBy: { createdAt: 'asc' } }))));
 app.get('/api/stores/:slug', h(async (req, res) => {
-  const s = await db.store.findUnique({ where: { slug: req.params.slug }, select: { ...storeSelect, zones: { where: { active: true }, select: { id: true, name: true, fee: true } } } });
+  const s = await db.store.findUnique({ where: { slug: req.params.slug }, select: { ...storeSelect, zones: { where: { active: true }, select: { id: true, name: true, fee: true, suburbs: true }, orderBy: { fee: 'asc' } } } });
   s ? res.json(s) : res.status(404).json({ error: 'Store not found' });
 }));
 app.get('/api/categories', h(async (_, res) => res.json(await db.category.findMany())));
@@ -87,6 +89,7 @@ app.post('/api/wholesale', h(async (req, res) => {
 }));
 
 app.use('/api/orders', orderRoutes);
+app.use('/api/cart', cartRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/account', accountRoutes);
 app.use('/api/reviews', reviewRoutes);
@@ -104,7 +107,15 @@ app.post('/api/ai/chat', aiLimit, h(async (req, res) => {
     return `- ${p.name} | ${p.category.name} | R${num(p.price).toFixed(2)}${p.soldByWeight ? '/kg' : ' each'} | ${q <= 0 ? 'OUT OF STOCK' : q <= low ? 'LOW STOCK' : 'In stock'} | ${p.description}`; }).join('\n');
   const qa = prods.flatMap(p => p.questions.filter(x => x.answers.length).map(x => `Q (${p.name}): ${x.text} A: ${x.answers[0].text}`)).slice(0, 20).join('\n');
   let own = ''; const u = res.locals.user as U | undefined;
-  if (u?.customerId) { const o = await db.order.findFirst({ where: { customerId: u.customerId }, orderBy: { createdAt: 'desc' }, include: { delivery: true } }); if (o) own = `Customer's latest order ${orderNo(o.seq)}: status ${o.status}${o.delivery ? ', delivery ' + o.delivery.status : ''}. Total R${num(o.total).toFixed(2)}.`; }
+  const latest = u?.customerId ? await db.order.findFirst({ where: { customerId: u.customerId }, orderBy: { createdAt: 'desc' }, include: { delivery: true } }) : null;
+  if (latest) own = `Customer's latest order ${orderNo(latest.seq)}: status ${latest.status}${latest.delivery ? ', delivery ' + latest.delivery.status : ''}. Total R${num(latest.total).toFixed(2)}.`;
+  // No AI key: answer the common questions straight from the database (basic mode).
+  if (!aiConfigured()) {
+    const w = (store.config as any)?.deliveryWindowMinutes;
+    const out = basicAnswer({ message: b.message, products: prods, storeName: store.name, zones: store.zones, windowMinutes: Array.isArray(w) ? [w[0], w[1]] : undefined,
+      latestOrder: latest && { number: orderNo(latest.seq), status: latest.status, delivery: latest.delivery?.status, fulfilment: latest.fulfilment }, signedIn: !!u?.customerId });
+    return res.json({ reply: out.reply, products: out.products.map(productCard), mode: 'basic' });
+  }
   const ctx = `Store: ${store.name} - ${store.description}\nAll prices are DEMO prices in ZAR.\nDelivery zones (demo fees): ${store.zones.map(z => `${z.name} R${num(z.fee)}`).join('; ')}. Collection from store is also available.${Array.isArray((store.config as any)?.deliveryWindowMinutes) ? ` Demo delivery estimate: about ${(store.config as any).deliveryWindowMinutes[0]}-${(store.config as any).deliveryWindowMinutes[1]} minutes after payment (an estimate, not a guarantee).` : ' No delivery time estimate is configured.'} Weight-based prices are per kg; the final price may vary slightly based on the actual weighed quantity. Payment is currently a DEMO (no real money). Large or business orders can use the Bulk & Wholesale quote form.\nCATALOGUE:\n${catalogue}\nAPPROVED Q&A:\n${qa || 'none'}\n${own}`;
   try {
     const reply = await askVallerie(ctx, b.history, b.message);
@@ -122,4 +133,6 @@ app.use((e: any, _: Request, res: Response, __: NextFunction) => {
 // GPS history is kept for 30 days, then deleted.
 const purgeTracking = () => db.trackingPoint.deleteMany({ where: { at: { lt: new Date(Date.now() - 30 * 864e5) } } }).catch(e => console.error('Tracking purge failed', e));
 purgeTracking(); setInterval(purgeTracking, 864e5).unref();
+// Unpaid orders are cancelled (and their stock returned) after UNPAID_ORDER_MINUTES; checked every minute.
+setInterval(() => { sweepUnpaidOrders().catch(e => console.error('Unpaid order sweep failed', e)); }, 60_000).unref();
 app.listen(+(process.env.PORT || 4000), () => console.log('Green Valley API on :' + (process.env.PORT || 4000)));

@@ -10,6 +10,7 @@ import { Badge, Button, EmptyState, ErrorState, Skeleton } from '../../component
 import { AdminHeader } from './AdminLayout';
 import { useAdmin, useAdminMutation, type AdminProduct, type InventoryRow } from './adminApi';
 import { useRef } from 'react';
+import { ImportProducts } from './ImportProducts';
 
 type Draft = { id?: string; storeId: string; name: string; description: string; price: string; categoryId: string; soldByWeight: boolean; quantity: string; lowThreshold: string; imageUrl: string; active: boolean };
 
@@ -28,6 +29,7 @@ export function Products() {
       <AdminHeader title="Products" actions={<Button onClick={startNew}><Plus className="size-4" aria-hidden /> Add product</Button>}>Prices are per kg for weighed products. Unavailable products stay here but are hidden from the shop.</AdminHeader>
       {editing && <ProductForm draft={editing} onClose={() => setEditing(null)} />}
       <BulkPhotos />
+      <ImportProducts />
       <div className="relative mb-4 max-w-md">
         <label htmlFor="prod-search" className="sr-only">Search products</label>
         <Search className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-ink-3" aria-hidden />

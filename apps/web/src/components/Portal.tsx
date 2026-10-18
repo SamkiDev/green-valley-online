@@ -8,6 +8,7 @@ import { useTheme } from '../lib/theme';
 import type { Me } from '../lib/api';
 import { Logo } from './Layout';
 import { Field } from './Field';
+import { ChooseNewPassword } from './ChooseNewPassword';
 import { Button, ErrorState, Skeleton } from './ui';
 
 type Role = NonNullable<Me>['role'];
@@ -54,6 +55,7 @@ export function RequireRole({ roles, title, children }: { roles: Role[]; title: 
         </div>
       </div>
     );
+  if (me.data.mustChangePassword) return <ChooseNewPassword name={me.data.name} />;
   return <>{children}</>;
 }
 
@@ -75,6 +77,7 @@ function PortalLogin({ title }: { title: string }) {
         {login.isError && <p className="rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text" role="alert">{login.error.message}</p>}
         <Button type="submit" size="lg" className="w-full" busy={login.isPending}>Sign in</Button>
       </form>
+      <p className="mt-4 text-sm text-ink-3">Forgot your password? Ask an admin to reset it. You'll get a temporary password and choose a new one when you sign in.</p>
     </div>
   );
 }

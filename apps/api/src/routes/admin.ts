@@ -1,11 +1,14 @@
 // Admin dashboard API. ADMIN sees everything; STORE_STAFF only their own store (via `scope`).
 // Routes marked need('ADMIN') hold private or centre-wide data (customers, drivers, store settings, wholesale).
 import express from 'express';
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { db, fail, h, me, need, num, orderNo, saPhone, scope, setOrderStatus } from '../core';
 import { imageRoutes } from './images';
+import { importRoutes } from './importProducts';
+import { sweepUnpaidOrders, UNPAID_MINUTES } from './orders';
 
 export const adminRoutes = express.Router();
 adminRoutes.use(need('ADMIN', 'STORE_STAFF'));
@@ -144,7 +147,8 @@ adminRoutes.get('/questions', h(async (_, res) => {
 adminRoutes.post('/questions/:id/answer', h(async (req, res) => {
   const { text } = z.object({ text: z.string().trim().min(1).max(500) }).parse(req.body);
   if (!(await db.question.findFirst({ where: { id: req.params.id, product: scope(res) } }))) return res.status(404).json({ error: 'Question not found' });
-  res.status(201).json(await db.answer.create({ data: { questionId: req.params.id, text, approved: true, authorUserId: me(res).id } }));
+  // Admin answers go live at once; store staff answers wait for an admin to approve them.
+  res.status(201).json(await db.answer.create({ data: { questionId: req.params.id, text, approved: me(res).role === 'ADMIN', authorUserId: me(res).id } }));
 }));
 
 // ---- review moderation ----
@@ -204,8 +208,57 @@ A.post('/drivers', h(async (req, res) => {
 A.patch('/users/:id/active', h(async (req, res) => {
   const { active } = z.object({ active: z.boolean() }).parse(req.body);
   if (req.params.id === me(res).id) return res.status(400).json({ error: "You can't disable your own account" });
-  const r = await db.user.updateMany({ where: { id: req.params.id, role: { not: 'ADMIN' } }, data: { active } });
+  // Disabling also signs the user out everywhere.
+  const r = await db.user.updateMany({ where: { id: req.params.id, role: { not: 'ADMIN' } }, data: { active, ...(active ? {} : { tokenVersion: { increment: 1 } }) } });
   r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'User not found' });
+}));
+
+// No email service yet, so a forgotten password is reset by an admin: a one-time temporary password,
+// shown once, which the user must change at next sign-in. Their other sessions end.
+const tempPassword = () => {
+  const words = ['braai', 'boerewors', 'sosatie', 'potjie', 'chakalaka', 'biltong', 'vetkoek', 'rooibos'];
+  return `${words[crypto.randomInt(words.length)]}-${crypto.randomInt(1000, 9999)}-${crypto.randomBytes(2).toString('hex')}`;
+};
+A.post('/users/:id/temporary-password', h(async (req, res) => {
+  if (req.params.id === me(res).id) return res.status(400).json({ error: 'Change your own password from your account page' });
+  const u = await db.user.findFirst({ where: { id: req.params.id, role: { not: 'ADMIN' } } });
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  const password = tempPassword();
+  await db.user.update({ where: { id: u.id }, data: { passwordHash: await bcrypt.hash(password, 12), mustChangePassword: true, tokenVersion: { increment: 1 } } });
+  res.json({ temporaryPassword: password, name: u.name, email: u.email });
+}));
+
+// ---- store staff accounts ----
+A.get('/staff', h(async (_, res) => {
+  const staff = await db.storeStaff.findMany({ include: { user: { select: { id: true, name: true, email: true, phone: true, active: true, createdAt: true } }, store: { select: { id: true, name: true } } }, orderBy: { user: { name: 'asc' } } });
+  res.json(staff.map(s => ({ id: s.id, user: s.user, store: s.store })));
+}));
+A.post('/staff', h(async (req, res) => {
+  const b = z.object({ email: z.string().trim().email(), name: z.string().trim().min(1).max(80), phone: saPhone.optional(), password: z.string().min(8).max(100), storeId: z.string().min(1) }).parse(req.body);
+  if (await db.user.findUnique({ where: { email: b.email.toLowerCase() } })) return res.status(409).json({ error: 'That email is already registered' });
+  if (!(await db.store.findUnique({ where: { id: b.storeId } }))) return res.status(400).json({ error: 'Store not found' });
+  // Staff choose their own password: the temporary one must be changed at first sign-in.
+  const u = await db.user.create({ data: { email: b.email.toLowerCase(), name: b.name, phone: b.phone, role: 'STORE_STAFF', mustChangePassword: true, passwordHash: await bcrypt.hash(b.password, 12), staff: { create: { storeId: b.storeId } } } });
+  res.status(201).json({ id: u.id });
+}));
+
+// Release stock held by unpaid orders now, instead of waiting for the automatic check.
+A.post('/orders/release-unpaid', h(async (_req, res) => res.json({ checked: await sweepUnpaidOrders(), minutes: UNPAID_MINUTES })));
+
+// ---- Q&A moderation (admin) ----
+A.patch('/answers/:id', h(async (req, res) => {
+  const { approved } = z.object({ approved: z.boolean() }).parse(req.body);
+  const r = await db.answer.updateMany({ where: { id: req.params.id }, data: { approved } });
+  r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'Answer not found' });
+}));
+A.delete('/answers/:id', h(async (req, res) => {
+  const r = await db.answer.deleteMany({ where: { id: req.params.id } });
+  r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'Answer not found' });
+}));
+A.delete('/questions/:id', h(async (req, res) => {
+  const q = await db.question.findUnique({ where: { id: req.params.id } }); if (!q) return res.status(404).json({ error: 'Question not found' });
+  await db.$transaction([db.answer.deleteMany({ where: { questionId: q.id } }), db.question.delete({ where: { id: q.id } })]);
+  res.json({ ok: true });
 }));
 
 A.get('/stores', h(async (_, res) => res.json(await db.store.findMany({ include: { zones: { orderBy: { fee: 'asc' } }, _count: { select: { products: { where: { deletedAt: null } } } } }, orderBy: { createdAt: 'asc' } }))));
@@ -221,13 +274,34 @@ A.patch('/stores/:id', h(async (req, res) => {
   const config = b.config ? ({ ...(s.config as Prisma.JsonObject), ...b.config } as Prisma.InputJsonValue) : undefined;
   res.json(await db.store.update({ where: { id: s.id }, data: { status: b.status, description: b.description, config } }));
 }));
+// Suburbs: trimmed, de-duplicated (case-insensitive), at most 200 per zone.
+const suburbList = z.array(z.string().trim().min(2).max(60)).max(200)
+  .transform(xs => [...new Map(xs.map(x => [x.toLowerCase().replace(/\s+/g, ' '), x.replace(/\s+/g, ' ')])).values()]);
+const zoneInput = z.object({ name: z.string().trim().min(1).max(80), fee: z.number().min(0).max(5000), suburbs: suburbList.default([]), active: z.boolean().default(true) });
+// A suburb may belong to only one zone per store, so an address always maps to one fee.
+async function suburbClash(storeId: string, suburbs: string[], exceptZoneId?: string) {
+  if (!suburbs.length) return null;
+  const others = await db.deliveryZone.findMany({ where: { storeId, ...(exceptZoneId ? { id: { not: exceptZoneId } } : {}) } });
+  const mine = new Set(suburbs.map(s => s.toLowerCase()));
+  for (const z of others) { const hit = z.suburbs.find(s => mine.has(s.toLowerCase())); if (hit) return `${hit} is already in ${z.name}`; }
+  return null;
+}
+A.post('/stores/:id/zones', h(async (req, res) => {
+  const b = zoneInput.parse(req.body);
+  if (!(await db.store.findUnique({ where: { id: req.params.id } }))) return res.status(404).json({ error: 'Store not found' });
+  const clash = await suburbClash(req.params.id, b.suburbs); if (clash) return res.status(409).json({ error: clash });
+  res.status(201).json(await db.deliveryZone.create({ data: { ...b, storeId: req.params.id } }));
+}));
 A.put('/zones/:id', h(async (req, res) => {
-  const b = z.object({ fee: z.number().min(0).max(5000).optional(), name: z.string().trim().min(1).max(80).optional(), active: z.boolean().optional() }).parse(req.body);
-  const r = await db.deliveryZone.updateMany({ where: { id: req.params.id }, data: b });
-  r.count ? res.json({ ok: true }) : res.status(404).json({ error: 'Zone not found' });
+  const b = zoneInput.partial().parse(req.body);
+  const zone = await db.deliveryZone.findUnique({ where: { id: req.params.id } }); if (!zone) return res.status(404).json({ error: 'Zone not found' });
+  if (b.suburbs) { const clash = await suburbClash(zone.storeId, b.suburbs, zone.id); if (clash) return res.status(409).json({ error: clash }); }
+  await db.deliveryZone.update({ where: { id: zone.id }, data: b });
+  res.json({ ok: true });
 }));
 
 A.get('/wholesale', h(async (_, res) => res.json(await db.wholesaleRequest.findMany({ orderBy: { createdAt: 'desc' } }))));
 
 adminRoutes.use(imageRoutes); // product photos (admin and store staff)
+adminRoutes.use(importRoutes); // catalogue import from CSV (admin and store staff)
 adminRoutes.use(A);
