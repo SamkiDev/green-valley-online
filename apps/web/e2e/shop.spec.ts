@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-const ADMIN = { email: 'admin@demo.local', password: 'demo-password-1' };
+const ADMIN = { email: 'admin@demo.local', password: process.env.ADMIN_PASSWORD ?? 'demo-password-1' };
 const unique = () => `${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
 type P = { id: string; name: string; soldByWeight: boolean; store?: { slug: string }; inventory: { quantity: string } | null };
@@ -96,8 +96,8 @@ test('Vallerie answers in basic mode without an AI key', async ({ page }) => {
   await expect(page.getByRole('dialog').getByText(/Zone 1/).first()).toBeVisible();
 });
 
-test('checkout picks the delivery zone from the suburb', async ({ page, request, playwright }) => {
-  const admin = await playwright.request.newContext({ baseURL: 'http://localhost:5180' });
+test('checkout picks the delivery zone from the suburb', async ({ page, request, playwright, baseURL }) => {
+  const admin = await playwright.request.newContext({ baseURL });
   await admin.post('/api/auth/login', { data: ADMIN });
   const stores: { slug: string; zones: { id: string; name: string }[] }[] = await (await admin.get('/api/admin/stores')).json();
   const zone1 = stores.find(s => s.slug === 'meat-market')!.zones.find(z => z.name.startsWith('Zone 1'))!;

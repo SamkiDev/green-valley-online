@@ -54,6 +54,26 @@ jobs:
       - name: Build API
         run: npm run build -w apps/api
 
+      - name: Production start, as on Render (one server for site + API)
+        working-directory: apps/api
+        env:
+          NODE_ENV: production
+          PORT: '4100'
+          TRUST_PROXY: '1'
+          STORAGE_PROVIDER: database
+          SEED_PASSWORD: ci-only-seed-password
+        run: |
+          nohup sh -c 'npx prisma migrate deploy && node dist/prisma/seed.js && node dist/src/server.js' > prod.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:4100/api/stores > /dev/null && break; sleep 1; done
+          curl -sf http://localhost:4100/ | grep -q '<div id="root">'
+          curl -sf http://localhost:4100/product/any-page | grep -q '<div id="root">'
+          curl -sI http://localhost:4100/ | grep -qi '^content-security-policy:'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4100/api/no-such-route)" = 404
+          pkill -f 'dist/src/server.js' || true
+      - name: Production log
+        if: failure()
+        run: cat apps/api/prod.log || true
+
       - name: Start API
         working-directory: apps/api
         run: |

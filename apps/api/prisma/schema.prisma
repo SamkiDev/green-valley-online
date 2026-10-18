@@ -342,3 +342,11 @@ model Favourite {
   product Product @relation(fields: [productId], references: [id])
   @@unique([customerId, productId])
 }
+
+// Uploaded files kept in the database (STORAGE_PROVIDER=database), for hosts whose disk is wiped on restart.
+model StoredFile {
+  id          String   @id // e.g. "products/3f2a….webp", served at /uploads/<id>
+  contentType String
+  bytes       Bytes
+  createdAt   DateTime @default(now())
+}

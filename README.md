@@ -50,9 +50,38 @@ First time only: `npx playwright install chromium` in `apps/web`. The tests plac
 `npm run db:reset` in `apps/api` before showing the demo. GitHub Actions (`.github/workflows/ci.yml`) runs all of
 this, plus type checks and builds, on every push.
 
+## Put the demo online (free)
+
+The site runs as one free [Render](https://render.com) web service (website and API at one address) with a free
+[Neon](https://neon.com) Postgres database. `render.yaml` describes the setup; you only create the two accounts.
+
+1. **Database (Neon):** sign up, create a project in region **AWS Europe (Frankfurt)**, then open **Connect**, turn
+   *Connection pooling* **off** and copy the connection string (it ends in `?sslmode=require`).
+2. **Website (Render):** sign up with GitHub and allow access to the `green-valley-online` repository. Choose
+   **New > Blueprint**, pick the repository, and fill in the two values Render asks for:
+   - `DATABASE_URL`: the Neon connection string.
+   - `SEED_PASSWORD`: a private password of 12+ characters. All demo accounts (`admin@demo.local`, etc.) use it.
+     The public default `demo-password-1` is refused on a hosted site.
+3. Click **Apply**. The first build takes about 5 to 10 minutes; the site is then at
+   `https://green-valley-online.onrender.com` (or the name Render shows). The demo data is added on the first start
+   only, so later restarts never undo your changes.
+
+Good to know about the free tiers:
+
+- The site **sleeps after 15 minutes** without visitors and takes about a minute to wake. Open it a few minutes before a demo.
+- Product photos are stored in the database (`STORAGE_PROVIDER=database`) because Render's free disk is wiped whenever the site sleeps or restarts.
+- Render's paid Starter plan (about $7 a month) never sleeps. Neon's free database pauses after 5 idle minutes and wakes in about a second.
+- Every push to `main` redeploys the site automatically.
+
+To check the live site with the browser tests (they place orders, so only on a demo copy):
+
+```bash
+BASE_URL=https://green-valley-online.onrender.com ADMIN_PASSWORD=your-seed-password npm run test:browser -w apps/web
+```
+
 ## Demo logins (DEMO ONLY)
 
-Password `demo-password-1` (or `SEED_PASSWORD` in `.env`):
+Password `demo-password-1` locally (or `SEED_PASSWORD` in `.env`; on a hosted site always `SEED_PASSWORD`):
 `admin@demo.local` · `driver1@demo.local` · `staff@demo.local` (Meat Market staff) · `customer@demo.local`
 
 ## Stores
@@ -105,7 +134,7 @@ Placing an order reserves its stock. Orders still unpaid after `UNPAID_ORDER_MIN
 
 ## Product photos
 
-Admins and store staff add photos from **Admin > Products**: *Take photo* opens the phone camera, *Upload* picks a file, and *Bulk photo upload* matches files to products by name (`Beef Mince.jpg`, `beef-short-ribs.png`). Every photo is re-encoded to WebP (at most 1200 px) with its metadata removed, including the GPS location phones embed. Files are stored in `apps/api/uploads` (git-ignored) and served at `/uploads`; replace `LocalStorage` in `apps/api/src/storage.ts` with S3 or Cloudinary later.
+Admins and store staff add photos from **Admin > Products**: *Take photo* opens the phone camera, *Upload* picks a file, and *Bulk photo upload* matches files to products by name (`Beef Mince.jpg`, `beef-short-ribs.png`). Every photo is re-encoded to WebP (at most 1200 px) with its metadata removed, including the GPS location phones embed. Files are stored in `apps/api/uploads` (git-ignored) and served at `/uploads`, or in the database with `STORAGE_PROVIDER=database` (used on the hosted demo). S3 or Cloudinary can replace either later in `apps/api/src/storage.ts`.
 
 ## Payments (Paystack)
 
