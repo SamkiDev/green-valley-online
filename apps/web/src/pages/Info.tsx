@@ -9,7 +9,7 @@ export function Deals() {
   const packs = useProducts({ store: 'meat-market', category: 'Braai', sort: 'low' });
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Deals" title="Specials & value packs">The shop's specials board will appear here once published. Meanwhile, braai packs give the best value for groups.</PageHeader>
+      <PageHeader title="Specials & value packs">The shop's specials board will appear here once published. Meanwhile, braai packs give the best value for groups.</PageHeader>
       <EmptyState icon={Tag} title="No specials published yet">Weekly specials (like wors, sausages and russians) will be listed here by the store.</EmptyState>
       <h2 className="mb-4 mt-10 text-2xl font-extrabold tracking-tight">Value packs</h2>
       {packs.isPending ? <ProductGridSkeleton n={4} /> : packs.isError ? <ErrorState message={packs.error.message} onRetry={() => packs.refetch()} /> : (
@@ -22,7 +22,7 @@ export function Deals() {
 export function About() {
   return (
     <div className="container-page max-w-3xl">
-      <PageHeader eyebrow="About" title="Green Valley Online">Your local shopping centre, delivered to your door.</PageHeader>
+      <PageHeader title="Green Valley Online">Your local shopping centre, delivered to your door.</PageHeader>
       <div className="space-y-5 text-lg text-ink-2">
         <p>Green Valley Online brings the stores at the Green Valley shopping centre together in one place. Browse the shops you already know, order from your phone, and choose delivery to your door or collection from the store.</p>
         <p>The <Link to="/stores/meat-market" className="font-semibold text-brand-text underline">Green Valley Meat Market</Link> is the first store online, including bulk and wholesale orders. The Farm Stall, Bottle Liquors and Supermarket will follow.</p>

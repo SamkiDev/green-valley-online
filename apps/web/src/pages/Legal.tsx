@@ -25,7 +25,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 export function Privacy() {
   return (
     <div className="container-page max-w-3xl">
-      <PageHeader eyebrow="Privacy" title="Privacy policy">How Green Valley Online collects, uses and protects your personal information under the Protection of Personal Information Act (POPIA).</PageHeader>
+      <PageHeader title="Privacy policy">How Green Valley Online collects, uses and protects your personal information under the Protection of Personal Information Act (POPIA).</PageHeader>
       <DraftNotice />
       <div className="text-ink-2 [&_li]:ml-5 [&_li]:list-disc">
         <Section title="Who we are">
@@ -75,7 +75,7 @@ export function Privacy() {
 export function Terms() {
   return (
     <div className="container-page max-w-3xl">
-      <PageHeader eyebrow="Terms" title="Terms of sale">The rules for ordering from stores on Green Valley Online.</PageHeader>
+      <PageHeader title="Terms of sale">The rules for ordering from stores on Green Valley Online.</PageHeader>
       <DraftNotice />
       <div className="text-ink-2 [&_li]:ml-5 [&_li]:list-disc">
         <Section title="Orders and prices">

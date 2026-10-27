@@ -59,7 +59,7 @@ export default function Wholesale() {
           <Field id="ws-date" label="Preferred date (optional)" type="date" min={new Date().toISOString().slice(0, 10)} value={f.preferredDate} onChange={set('preferredDate')} error={show('preferredDate')} />
           <TextArea id="ws-notes" label="Notes (optional)" className="sm:col-span-2" maxLength={500} value={f.notes} onChange={set('notes')} error={show('notes')} />
           {send.isError && !serverErrors && <p className="rounded-xl bg-danger-bg p-3 text-sm font-semibold text-danger-text sm:col-span-2" role="alert">{send.error.message}</p>}
-          <Button type="submit" size="lg" variant="meat" className="sm:col-span-2" busy={send.isPending}>REQUEST A QUOTE</Button>
+          <Button type="submit" size="lg" variant="meat" className="sm:col-span-2" busy={send.isPending}>Request a quote</Button>
         </form>
         <aside className="card space-y-3 p-5">
           <span className="grid size-11 place-items-center rounded-xl bg-meat text-on-meat"><Truck className="size-5" aria-hidden /></span>

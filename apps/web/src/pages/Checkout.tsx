@@ -56,7 +56,7 @@ export default function Checkout() {
 }
 
 function Shell({ children }: { children: ReactNode }) {
-  return <div className="container-page"><PageHeader eyebrow="Checkout" title="Checkout" />{children}</div>;
+  return <div className="container-page"><PageHeader title="Checkout" />{children}</div>;
 }
 
 function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: string; email: string; phone: string } }) {
@@ -153,7 +153,7 @@ function CheckoutFlow({ guest, defaults }: { guest: boolean; defaults: { name: s
 
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Checkout" title="Checkout" />
+      <PageHeader title="Checkout" />
       <CheckoutSteps current={step} skipped={delivery ? [] : [2]} />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <div className="card p-5 sm:p-6">

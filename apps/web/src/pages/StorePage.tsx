@@ -35,7 +35,7 @@ export default function StorePage() {
             <p className="mt-1 font-semibold text-on-panel-2">{s.category}</p>
             {s.description && <p className="mt-3 max-w-xl text-on-panel-2">{s.description}</p>}
           </div>
-          {active && <LinkButton to={`/shop?store=${slug}`} size="lg" variant={slug === 'meat-market' ? 'meat' : 'primary'} className="shrink-0">SHOP NOW <ArrowRight className="size-5" aria-hidden /></LinkButton>}
+          {active && <LinkButton to={`/shop?store=${slug}`} size="lg" variant={slug === 'meat-market' ? 'meat' : 'primary'} className="shrink-0">Shop now <ArrowRight className="size-5" aria-hidden /></LinkButton>}
         </div>
       </section>
 

@@ -26,7 +26,7 @@ export default function Account() {
   const tabs = customer ? TABS : TABS.filter(t => t.key === 'profile');
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Account" title={`Hello, ${me.data.name.split(' ')[0]}`}>Signed in as {ROLE_LABEL[me.data.role]}{customer ? '' : '. Use the staff portal for your work.'}</PageHeader>
+      <PageHeader title={`Hello, ${me.data.name.split(' ')[0]}`}>Signed in as {ROLE_LABEL[me.data.role]}{customer ? '' : '. Use the staff portal for your work.'}</PageHeader>
       <AccountTabs tabs={tabs} />
       <div className="mt-8 flex flex-wrap gap-2">
         <Button variant="secondary" busy={logout.isPending} onClick={() => logout.mutate()}><LogOut className="size-4" aria-hidden /> Sign out</Button>
@@ -207,7 +207,7 @@ function AuthForms() {
 
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Account" title={mode === 'login' ? 'Sign in' : 'Create your account'}>Track orders, reorder favourites and check out faster.</PageHeader>
+      <PageHeader title={mode === 'login' ? 'Sign in' : 'Create your account'}>Track orders, reorder favourites and check out faster.</PageHeader>
       <div className="card max-w-md p-5 sm:p-6">
         <div className="mb-5 grid grid-cols-2 rounded-xl bg-surface-2 p-1" role="tablist" aria-label="Sign in or register">
           {(['login', 'register'] as const).map(k => (

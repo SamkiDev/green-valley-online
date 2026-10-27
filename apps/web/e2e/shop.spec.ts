@@ -16,7 +16,7 @@ async function stockedItem(request: APIRequestContext) {
 async function addToCart(page: Page, request: APIRequestContext) {
   const p = await stockedItem(request);
   await page.goto(`/product/${p.id}`);
-  await page.getByRole('button', { name: 'Add to Cart' }).first().click();
+  await page.getByRole('button', { name: 'Add to cart' }).first().click();
   await expect(page.getByRole('button', { name: 'Added' }).first()).toBeVisible();
   return p.name;
 }

@@ -25,7 +25,7 @@ export function StoreCard({ s }: { s: Store }) {
         {s.description && <p className="text-ink-2">{s.description}</p>}
         <div className="mt-auto flex flex-wrap gap-2 pt-2">
           {active ? (
-            <LinkButton to={`/shop?store=${s.slug}`} variant={s.slug === 'meat-market' ? 'meat' : 'primary'}>SHOP NOW <ArrowRight className="size-4" aria-hidden /></LinkButton>
+            <LinkButton to={`/shop?store=${s.slug}`} variant={s.slug === 'meat-market' ? 'meat' : 'primary'}>Shop now <ArrowRight className="size-4" aria-hidden /></LinkButton>
           ) : (
             <span className="inline-flex min-h-11 items-center rounded-xl bg-surface-2 px-4 text-[0.95rem] font-semibold text-ink-2">Opening online soon</span>
           )}
@@ -40,7 +40,7 @@ export default function Stores() {
   const stores = useStores();
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Green Valley" title="Stores">Every store in the centre, one checkout. More stores are coming online soon.</PageHeader>
+      <PageHeader title="Stores">Every store in the centre, one checkout. More stores are coming online soon.</PageHeader>
       {stores.isPending ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-60" />)}</div>
       ) : stores.isError ? <ErrorState message={stores.error.message} onRetry={() => stores.refetch()} /> : (

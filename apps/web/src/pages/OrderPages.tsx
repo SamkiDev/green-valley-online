@@ -34,7 +34,7 @@ export function OrderConfirmation() {
         </p>
         {paid && o.estimatedWindow && <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 font-semibold"><Clock className="size-4" aria-hidden /> Estimated delivery {windowLabel(o.estimatedWindow)} <span className="text-xs font-bold text-on-panel-2">DEMO ESTIMATE</span></p>}
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          {paid ? <LinkButton to={`/track/${o.id}`} size="lg">TRACK MY ORDER</LinkButton> : <LinkButton to={`/checkout/pay/${o.id}`} size="lg">Complete payment</LinkButton>}
+          {paid ? <LinkButton to={`/track/${o.id}`} size="lg">Track my order</LinkButton> : <LinkButton to={`/checkout/pay/${o.id}`} size="lg">Complete payment</LinkButton>}
           <LinkButton to="/shop" size="lg" variant={paid ? 'onPanel' : 'secondary'}>Keep shopping</LinkButton>
         </div>
       </section>
