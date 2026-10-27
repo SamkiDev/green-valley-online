@@ -4,7 +4,9 @@ import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import { PrismaClient, Role, OrderStatus, Prisma } from '@prisma/client';
 
-export const db = new PrismaClient();
+// Transactions get more time than Prisma's 5 s default: a hosted free database can be slow to wake up,
+// and placing an order must not fail halfway because of that (the transaction still rolls back on error).
+export const db = new PrismaClient({ transactionOptions: { maxWait: 10_000, timeout: 20_000 } });
 
 export type U = { id: string; role: Role; name: string; email: string; phone: string | null; mustChangePassword: boolean; storeId?: string; customerId?: string; driverId?: string };
 export type Tx = Prisma.TransactionClient;

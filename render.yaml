@@ -1,0 +1,35 @@
+# Render blueprint: one free web service that runs the API and serves the website at the same address.
+# The database is a free Neon Postgres; paste its connection string when Render asks for DATABASE_URL.
+# Setup steps: README > "Put the demo online".
+services:
+  - type: web
+    name: green-valley-online
+    runtime: node
+    plan: free
+    region: frankfurt # closest Render region to South Africa
+    buildCommand: >-
+      npm ci --include=dev &&
+      cd apps/api && npx prisma generate && npm run build &&
+      cd ../web && npm run build
+    # Creates or updates the tables, adds the demo data once (empty database only), then starts the server.
+    startCommand: cd apps/api && npx prisma migrate deploy && node dist/prisma/seed.js && node dist/src/server.js
+    healthCheckPath: /api/stores
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL # Neon's direct connection string (not the pooled one), ending in ?sslmode=require
+        sync: false
+      - key: SEED_PASSWORD # password for the demo accounts on the hosted site; 12+ characters, keep it private
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TRUST_PROXY # Render sits behind one proxy; needed for correct rate limiting
+        value: "1"
+      - key: PAYMENT_PROVIDER
+        value: demo
+      - key: UNPAID_ORDER_MINUTES
+        value: "30"
+      - key: STORAGE_PROVIDER # product photos in the database: Render's free disk is wiped whenever the site sleeps
+        value: database

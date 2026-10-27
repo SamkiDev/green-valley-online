@@ -1,4 +1,5 @@
-// DEMO DATA ONLY (isDemo=true). Fictional people, demo prices. Never run against production.
+// DEMO DATA ONLY (isDemo=true). Fictional people, demo prices. Never run against a real shop's database.
+// On a hosted demo (NODE_ENV=production) it needs SEED_PASSWORD and only runs on an empty database.
 import { PrismaClient } from '@prisma/client'; import bcrypt from 'bcryptjs';
 const db = new PrismaClient();
 // [name, category, demo price (per kg when soldByWeight), soldByWeight, stock (kg or units), popularity, description]
@@ -45,6 +46,11 @@ const STORES = [
     config: { accent: { primary: '#0284C7', secondary: '#0C4A6E' }, whatsapp: '', hours: '' } },
 ];
 async function main() {
+  // Hosted demo: the demo accounts must not use the public default password, and a restart must not undo admin edits.
+  if (process.env.NODE_ENV === 'production') {
+    if ((process.env.SEED_PASSWORD ?? '').length < 12) throw new Error('Set SEED_PASSWORD (12+ characters) before seeding a hosted demo: the demo accounts would otherwise use the public default password.');
+    if (await db.store.count()) { console.log('Demo data already present; seed skipped.'); return; }
+  }
   for (const s of STORES) await db.store.upsert({ where: { slug: s.slug }, update: { name: s.name, category: s.category, description: s.description }, create: s });
   const meat = await db.store.findUniqueOrThrow({ where: { slug: 'meat-market' } });
   for (const [name, fee] of [['Zone 1 – Nearby areas', 40], ['Zone 2 – Extended areas', 65], ['Zone 3 – Further delivery area', 100]] as const)

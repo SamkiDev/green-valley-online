@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import fs from 'node:fs'; import path from 'node:path';
 import express, { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet'; import cookieParser from 'cookie-parser'; import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs'; import jwt from 'jsonwebtoken'; import { z } from 'zod';
@@ -12,20 +13,33 @@ import { accountRoutes } from './routes/account';
 import { reviewRoutes } from './routes/reviews';
 import { aiConfigured, askVallerie, mentionedProducts, productCard } from './ai';
 import { basicAnswer } from './basicAssistant';
-import { UPLOAD_ROOT, UPLOAD_URL } from './storage';
+import { readStoredFile, storage, UPLOAD_ROOT, UPLOAD_URL } from './storage';
 
 const app = express();
 // Which proxies to trust for the client IP (rate limits). Dev: the Vite proxy on localhost. Behind a host's proxy set TRUST_PROXY (e.g. 1).
-app.set('trust proxy', /^d+$/.test(process.env.TRUST_PROXY ?? '') ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY || 'loopback');
+app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY ?? '') ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY || 'loopback');
 // rawBody is kept for webhook signature checks (Paystack signs the exact bytes it sends).
-app.use(helmet(), express.json({ limit: '50kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } }), cookieParser());
+// Content-Security-Policy for the web app served from here in production: own scripts only,
+// Google Fonts, and OpenStreetMap tiles for the delivery map.
+app.use(helmet({ contentSecurityPolicy: { directives: {
+  'default-src': ["'self'"], 'script-src': ["'self'"], 'connect-src': ["'self'"],
+  'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], 'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
+  'img-src': ["'self'", 'data:', 'blob:', 'https://tile.openstreetmap.org', 'https://*.tile.openstreetmap.org'],
+  'form-action': ["'self'"], 'frame-ancestors': ["'none'"], 'object-src': ["'none'"], 'base-uri': ["'self'"],
+  'upgrade-insecure-requests': null, // the host serves https; keeps a local production test on http working
+} } }), express.json({ limit: '50kb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } }), cookieParser());
 app.use((req, res, next) => { // minimal CORS for the Vite frontend, with credentials
   const o = process.env.WEB_ORIGIN; if (o && req.headers.origin === o) { res.set({ 'Access-Control-Allow-Origin': o, 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Allow-Headers': 'Content-Type, X-Order-Token', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE' }); }
   req.method === 'OPTIONS' ? res.sendStatus(204) : next();
 });
 app.use('/api', rateLimit({ windowMs: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MINUTE) || 300 }));
 // Uploaded product photos. File names are random UUIDs, so they can be cached for a long time.
-app.use(UPLOAD_URL, express.static(UPLOAD_ROOT, { maxAge: '30d', immutable: true, index: false, fallthrough: false }));
+if (storage.name === 'database') {
+  app.get(/^\/uploads\/([\w-]+\/[\w-]+\.\w+)$/, h(async (req, res) => {
+    const f = await readStoredFile(req.params[0]); if (!f) return res.sendStatus(404);
+    res.set({ 'Content-Type': f.contentType, 'Cache-Control': 'public, max-age=2592000, immutable', 'X-Content-Type-Options': 'nosniff' }).send(Buffer.from(f.bytes));
+  }));
+} else app.use(UPLOAD_URL, express.static(UPLOAD_ROOT, { maxAge: '30d', immutable: true, index: false, fallthrough: false }));
 
 // ---- auth: role is ALWAYS loaded from the DB, never trusted from the client or token claims ----
 async function load(req: Request, res: Response, next: NextFunction) {
@@ -123,6 +137,17 @@ app.post('/api/ai/chat', aiLimit, h(async (req, res) => {
   }
   catch (e) { console.error('AI error', (e as Error).message); res.status(503).json({ error: 'AI_UNAVAILABLE', reply: 'Vallerie is temporarily unavailable. You can continue shopping normally.' }); }
 }));
+
+// Production: this server also serves the built web app (apps/web/dist), so the whole site is one address.
+// Any page URL that isn't an API or upload path gets index.html and React Router takes over.
+const WEB_DIST = process.env.NODE_ENV === 'production'
+  ? [process.env.WEB_DIST, path.resolve(__dirname, '../../web/dist'), path.resolve(__dirname, '../../../web/dist')].find(p => p && fs.existsSync(path.join(p, 'index.html')))
+  : undefined;
+if (WEB_DIST) {
+  app.use(express.static(WEB_DIST, { index: false, setHeaders: (res, file) => res.setHeader('Cache-Control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache') }));
+  app.get(/^\/(?!api\/|api$|uploads\/).*/, (_req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.sendFile(path.join(WEB_DIST, 'index.html')); });
+  console.log('Serving the web app from ' + WEB_DIST);
+}
 
 app.use((e: any, _: Request, res: Response, __: NextFunction) => {
   if (e instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', details: e.flatten().fieldErrors });

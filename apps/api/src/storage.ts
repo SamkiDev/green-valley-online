@@ -1,8 +1,11 @@
-// Where uploaded files live. LocalStorage writes under apps/api/uploads and serves them at /uploads;
-// an S3 or Cloudinary implementation can replace it later without touching the routes.
+// Where uploaded files live, chosen by STORAGE_PROVIDER:
+// - local (default): files under apps/api/uploads, served at /uploads.
+// - database: files kept in Postgres (StoredFile), for hosts that wipe their disk on restart, such as Render's free tier.
+// An S3 or Cloudinary implementation can replace either later without touching the routes.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { db } from './core';
 
 export interface StorageProvider {
   name: string;
@@ -32,4 +35,22 @@ export const LocalStorage: StorageProvider = {
   },
 };
 
-export const storage: StorageProvider = LocalStorage; // choose by process.env.STORAGE_PROVIDER once others exist
+const keyOf = (url: string) => (url.startsWith(UPLOAD_URL + '/') ? url.slice(UPLOAD_URL.length + 1) : null);
+const TYPES: Record<string, string> = { webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+
+export const DatabaseStorage: StorageProvider = {
+  name: 'database',
+  async save(folder, bytes, ext) {
+    const id = `${folder}/${crypto.randomUUID()}.${ext}`;
+    await db.storedFile.create({ data: { id, contentType: TYPES[ext] ?? 'application/octet-stream', bytes } });
+    return `${UPLOAD_URL}/${id}`;
+  },
+  async remove(url) {
+    const id = keyOf(url); if (id) await db.storedFile.deleteMany({ where: { id } });
+  },
+};
+
+/** Reads a file saved by DatabaseStorage (null if missing). */
+export const readStoredFile = (id: string) => db.storedFile.findUnique({ where: { id } });
+
+export const storage: StorageProvider = process.env.STORAGE_PROVIDER === 'database' ? DatabaseStorage : LocalStorage;
