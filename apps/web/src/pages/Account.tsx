@@ -198,7 +198,8 @@ function AuthForms() {
   const submit = (e: FormEvent) => {
     e.preventDefault(); setTouched(true);
     if (Object.keys(errors).length || consentErr) return;
-    const done = { onSuccess: () => next && next.startsWith('/') && nav(next) };
+    // Only same-site paths: "/checkout" yes, "//other-site.com" or "/\other-site.com" no.
+    const done = { onSuccess: () => next && /^\/(?![/\\])/.test(next) && nav(next) };
     if (mode === 'login') login.mutate({ email: f.email.trim(), password: f.password }, done);
     else register.mutate({ name: f.name.trim(), email: f.email.trim(), password: f.password, acceptPrivacy: true, ...(f.phone.trim() ? { phone: f.phone.trim() } : {}) }, done);
   };

@@ -100,12 +100,16 @@ adminRoutes.get('/driver-options', h(async (_, res) => {
 }));
 
 // ---- products & inventory ----
-const productInput = z.object({
-  name: z.string().trim().min(1).max(100), description: z.string().trim().max(500).default(''),
+// Updates use the fields without defaults: a default inside a partial update would overwrite saved values
+// (e.g. a stock-only update blanking the description).
+const productFields = z.object({
+  name: z.string().trim().min(1).max(100), description: z.string().trim().max(500),
   price: z.number().positive().max(100000), categoryId: z.string().min(1), soldByWeight: z.boolean(),
-  imageUrl: z.string().trim().url().max(500).nullable().optional(), active: z.boolean().optional(),
+  imageUrl: z.string().trim().url().max(500).regex(/^https?:\/\//i, 'Use an http(s) image link').nullable().optional(), active: z.boolean().optional(),
   quantity: z.number().min(0).max(100000).optional(), lowThreshold: z.number().min(0).max(10000).optional(),
 });
+const productInput = productFields.extend({ description: z.string().trim().max(500).default('') });
+const productUpdate = productFields.partial();
 const inventoryOf = (quantity?: number, lowThreshold?: number) => ({ ...(quantity !== undefined ? { quantity } : {}), ...(lowThreshold !== undefined ? { lowThreshold } : {}) });
 
 adminRoutes.get('/products', h(async (_, res) => res.json(await db.product.findMany({
@@ -121,7 +125,7 @@ adminRoutes.post('/products', h(async (req, res) => {
   res.status(201).json(p);
 }));
 adminRoutes.patch('/products/:id', h(async (req, res) => {
-  const { quantity, lowThreshold, ...data } = productInput.partial().parse(req.body);
+  const { quantity, lowThreshold, ...data } = productUpdate.parse(req.body);
   // Check access first: a stock-only update has no product fields, and updateMany with empty data matches nothing.
   if (!(await db.product.findFirst({ where: { id: req.params.id, ...scope(res), deletedAt: null }, select: { id: true } }))) return res.status(404).json({ error: 'Product not found' });
   if (Object.keys(data).length) await db.product.update({ where: { id: req.params.id }, data });
@@ -217,7 +221,7 @@ A.patch('/users/:id/active', h(async (req, res) => {
 // shown once, which the user must change at next sign-in. Their other sessions end.
 const tempPassword = () => {
   const words = ['braai', 'boerewors', 'sosatie', 'potjie', 'chakalaka', 'biltong', 'vetkoek', 'rooibos'];
-  return `${words[crypto.randomInt(words.length)]}-${crypto.randomInt(1000, 9999)}-${crypto.randomBytes(2).toString('hex')}`;
+  return `${words[crypto.randomInt(words.length)]}-${crypto.randomInt(1000, 9999)}-${crypto.randomBytes(4).toString('hex')}`; // about 48 bits
 };
 A.post('/users/:id/temporary-password', h(async (req, res) => {
   if (req.params.id === me(res).id) return res.status(400).json({ error: 'Change your own password from your account page' });
@@ -277,7 +281,9 @@ A.patch('/stores/:id', h(async (req, res) => {
 // Suburbs: trimmed, de-duplicated (case-insensitive), at most 200 per zone.
 const suburbList = z.array(z.string().trim().min(2).max(60)).max(200)
   .transform(xs => [...new Map(xs.map(x => [x.toLowerCase().replace(/\s+/g, ' '), x.replace(/\s+/g, ' ')])).values()]);
-const zoneInput = z.object({ name: z.string().trim().min(1).max(80), fee: z.number().min(0).max(5000), suburbs: suburbList.default([]), active: z.boolean().default(true) });
+const zoneFields = z.object({ name: z.string().trim().min(1).max(80), fee: z.number().min(0).max(5000), suburbs: suburbList, active: z.boolean() });
+const zoneInput = zoneFields.extend({ suburbs: suburbList.default([]), active: z.boolean().default(true) });
+const zoneUpdate = zoneFields.partial(); // no defaults: a fee-only update must not wipe the suburbs
 // A suburb may belong to only one zone per store, so an address always maps to one fee.
 async function suburbClash(storeId: string, suburbs: string[], exceptZoneId?: string) {
   if (!suburbs.length) return null;
@@ -293,7 +299,7 @@ A.post('/stores/:id/zones', h(async (req, res) => {
   res.status(201).json(await db.deliveryZone.create({ data: { ...b, storeId: req.params.id } }));
 }));
 A.put('/zones/:id', h(async (req, res) => {
-  const b = zoneInput.partial().parse(req.body);
+  const b = zoneUpdate.parse(req.body);
   const zone = await db.deliveryZone.findUnique({ where: { id: req.params.id } }); if (!zone) return res.status(404).json({ error: 'Zone not found' });
   if (b.suburbs) { const clash = await suburbClash(zone.storeId, b.suburbs, zone.id); if (clash) return res.status(409).json({ error: clash }); }
   await db.deliveryZone.update({ where: { id: zone.id }, data: b });

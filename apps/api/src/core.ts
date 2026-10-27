@@ -2,6 +2,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
+import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { PrismaClient, Role, OrderStatus, Prisma } from '@prisma/client';
 
 // Transactions get more time than Prisma's 5 s default: a hosted free database can be slow to wake up,
@@ -16,6 +17,10 @@ export const me = (res: Response) => res.locals.user as U;
 export const num = (d: Prisma.Decimal | number) => Number(d);
 export const orderNo = (seq: number) => 'GV' + (10283 + seq);
 export const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
+
+// Rate limits answer in JSON so the site can show the message.
+export const limit = (windowMs: number, max: number, message: string, extra: Partial<RateLimitOptions> = {}) =>
+  rateLimit({ windowMs, limit: max, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: message }, ...extra });
 
 // Role is always the one loaded from the database for this request (see `load` in server.ts).
 export const need = (...roles: Role[]) => (_: Request, res: Response, next: NextFunction) => {
@@ -34,5 +39,8 @@ export const saPhone = z.string().trim().refine(v => /^(\+27|0)\d{9}$/.test(v.re
 // ---- sessions: a signed cookie carrying the user's tokenVersion; bumping the version signs them out everywhere ----
 export const SECRET = process.env.JWT_SECRET ?? '';
 if (SECRET.length < 24) throw new Error('Set a long JWT_SECRET in .env');
+// The placeholder from .env.example is public: anyone could sign sessions with it.
+if (SECRET === 'change-me-to-a-long-random-string') throw new Error('JWT_SECRET is still the example value: set your own random secret in .env');
+export const JWT_ALG = 'HS256' as const; // pinned when signing and verifying
 export const setSession = (res: Response, id: string, v: number) =>
-  res.cookie('gvo', jwt.sign({ sub: id, v }, SECRET, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 864e5 });
+  res.cookie('gvo', jwt.sign({ sub: id, v }, SECRET, { expiresIn: '7d', algorithm: JWT_ALG }), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 864e5 });

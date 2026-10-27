@@ -146,7 +146,7 @@ test('admin adds staff, resets a password, and previews a catalogue import', asy
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: /Reset password/ }).click();
   const temp = (await page.getByTestId('temp-password').textContent())!.trim();
-  expect(temp).toMatch(/^[a-z]+-\d{4}-[0-9a-f]{4}$/);
+  expect(temp).toMatch(/^[a-z]+-\d{4}-[0-9a-f]{8}$/);
 
   // The staff member signs in with the temporary password and must choose their own.
   const staff = await browser.newContext();
