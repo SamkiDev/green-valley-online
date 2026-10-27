@@ -1,8 +1,9 @@
 import { Link } from 'react-router';
-import { ArrowRight, Beef, ClipboardList, Drumstick, Flame, Ham, MapPin, PackageCheck, Search, Truck, Utensils } from 'lucide-react';
-import { useProducts, useStores } from '../lib/queries';
+import { ArrowRight, Beef, Drumstick, Flame, Ham, Truck, Utensils } from 'lucide-react';
+import { useProducts, useStore, useStores } from '../lib/queries';
+import { rand } from '../lib/format';
 import { ProductCard, ProductGridSkeleton } from '../components/ProductCard';
-import { Badge, ErrorState, LinkButton } from '../components/ui';
+import { Badge, DemoTag, ErrorState, LinkButton } from '../components/ui';
 import type { Store } from '../lib/api';
 
 const MEAT_CATEGORIES = [
@@ -16,8 +17,8 @@ function StoreRow({ s }: { s: Store }) {
     <li className="flex items-center gap-3 rounded-xl bg-white/[0.06] p-3">
       <span className="h-9 w-1.5 shrink-0 rounded-full" style={{ background: s.config.accent?.primary ?? '#888' }} aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold text-on-panel">{s.name}</p>
-        <p className="truncate text-sm text-on-panel-2">{s.category}</p>
+        <p className="font-semibold leading-snug text-on-panel">{s.name}</p>
+        <p className="text-sm text-on-panel-2">{s.category}</p>
       </div>
       <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold ${active ? 'bg-emerald-400 text-emerald-950' : 'bg-white/10 text-on-panel-2'}`}>{active ? 'Open online' : 'Coming soon'}</span>
     </li>
@@ -33,14 +34,14 @@ export default function Home() {
       {/* Hero */}
       <section className="bg-panel text-on-panel">
         <div className="container-page grid grid-cols-1 gap-10 py-12 md:py-16 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-center lg:py-20">
-          <div className="animate-rise">
-            <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-on-panel-2"><MapPin className="size-4" aria-hidden /> Green Valley, Johannesburg</p>
+          <div>
             <h1 className="text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">Your local shopping centre, delivered to your door.</h1>
-            <p className="mt-5 max-w-xl text-lg text-on-panel-2">Shop fresh meat, produce, groceries and more from businesses you already know.</p>
+            <p className="mt-5 max-w-xl text-lg text-on-panel-2">
+              Order from the Green Valley Meat Market in Johannesburg for delivery or collection. The Farm Stall, Bottle Liquors and Supermarket are coming soon.
+            </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <LinkButton to="/shop" size="lg" variant="primary">SHOP NOW <ArrowRight className="size-5" aria-hidden /></LinkButton>
-              <LinkButton to="/stores" size="lg" variant="onPanel">EXPLORE STORES</LinkButton>
-              <LinkButton to="/wholesale" size="lg" variant="onPanel">BULK &amp; WHOLESALE</LinkButton>
+              <LinkButton to="/shop" size="lg" variant="primary">Shop the Meat Market <ArrowRight className="size-5" aria-hidden /></LinkButton>
+              <LinkButton to="/stores" size="lg" variant="onPanel">See all stores</LinkButton>
             </div>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
@@ -57,7 +58,7 @@ export default function Home() {
       </section>
 
       {/* Meat Market feature */}
-      <section className="container-page mt-10 md:mt-14" aria-labelledby="meat-heading">
+      <section className="container-page mt-12 md:mt-16" aria-labelledby="meat-heading">
         <div className="overflow-hidden rounded-3xl bg-panel text-on-panel">
           <div className="h-1.5 bg-meat" aria-hidden />
           <div className="grid grid-cols-1 gap-8 p-6 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] md:p-10">
@@ -110,26 +111,40 @@ export default function Home() {
         <LinkButton to="/shop" variant="secondary" className="mt-5 w-full sm:hidden">View all products</LinkButton>
       </section>
 
-      {/* How it works */}
-      <section className="container-page mt-12 md:mt-16" aria-labelledby="how-heading">
-        <h2 id="how-heading" className="sr-only">How it works</h2>
-        <ol className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
-          {[
-            { icon: Search, title: 'Choose', body: 'Browse stores and products you already know, with live stock.' },
-            { icon: ClipboardList, title: 'Order', body: 'Pick delivery or collection, then pay at checkout.' },
-            { icon: PackageCheck, title: 'Track', body: 'Follow your order from the counter to your door.' },
-          ].map(({ icon: Icon, title, body }, i) => (
-            <li key={title} className="card flex items-start gap-4 p-5">
-              <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-text"><Icon className="size-6" aria-hidden /></span>
-              <div>
-                <p className="text-sm font-bold text-ink-3">Step {i + 1}</p>
-                <h3 className="text-lg font-extrabold">{title}</h3>
-                <p className="mt-1 text-ink-2">{body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <DeliveryFacts />
     </>
+  );
+}
+
+// What a customer needs to know before ordering, read from the Meat Market's own settings (zones, fees, times).
+function DeliveryFacts() {
+  const store = useStore('meat-market');
+  if (!store.data) return null;
+  const fees = store.data.zones.map(z => Number(z.fee)).sort((a, b) => a - b);
+  const win = store.data.config.deliveryWindowMinutes;
+  const hours = store.data.config.hours;
+  const facts = [
+    { term: 'Delivery', detail: fees.length ? `${rand(fees[0])} to ${rand(fees[fees.length - 1])}, depending on your area` : 'Collection only for now', demo: fees.length > 0 },
+    { term: 'Delivery time', detail: win ? `About ${win[0]} to ${win[1]} minutes after payment` : 'Confirmed by the store after you order', demo: !!win },
+    { term: 'Collection', detail: hours ? `Free, from the Meat Market counter (${hours})` : 'Free, from the Meat Market counter', demo: false },
+    { term: 'Paying', detail: 'Card or EFT at checkout, then follow your order live', demo: false },
+  ];
+  return (
+    <section className="container-page mt-12 md:mt-16" aria-labelledby="delivery-heading">
+      <div className="card p-5 md:p-6">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="delivery-heading" className="text-xl font-extrabold tracking-tight md:text-2xl">Delivery and collection</h2>
+          <LinkButton to="/stores/meat-market" variant="ghost" size="sm">Store hours and contact <ArrowRight className="size-4" aria-hidden /></LinkButton>
+        </div>
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 border-t border-line pt-4 sm:grid-cols-2 lg:grid-cols-4">
+          {facts.map(f => (
+            <div key={f.term}>
+              <dt className="flex items-center gap-2 text-sm font-semibold text-ink-3">{f.term}{f.demo && <DemoTag />}</dt>
+              <dd className="mt-1 font-semibold">{f.detail}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </section>
   );
 }

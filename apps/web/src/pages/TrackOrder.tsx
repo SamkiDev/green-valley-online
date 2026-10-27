@@ -16,7 +16,7 @@ export default function TrackOrder() {
   const device = guestOrders();
   return (
     <div className="container-page">
-      <PageHeader eyebrow="Orders" title="Track your order">See where your order is, from the counter to your door.</PageHeader>
+      <PageHeader title="Track your order">See where your order is, from the counter to your door.</PageHeader>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <div className="space-y-6">
           {me.isPending ? <Skeleton className="h-32" /> : me.data?.role === 'CUSTOMER' ? (

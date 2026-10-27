@@ -95,14 +95,14 @@ If a button says the delivery was already updated, refresh the page; someone els
 
 Share this part with customers, or send it as a WhatsApp message when the shop goes online.
 
-1. Open `[site]`, browse **Shop** or search, and tap **Add to Cart**. Items sold per kg let you choose the weight.
+1. Open `[site]`, browse **Shop** or search, and tap **Add to cart**. Items sold per kg let you choose the weight.
 2. Not sure what to buy? Tap **Vallerie** and ask, for example "What do I need for a braai for 8?"
-3. Open the cart, choose **Delivery** or **Collect in store**, and tap **CHECKOUT**.
+3. Open the cart, choose **Delivery** or **Collect in store**, and tap **Checkout**.
 4. Sign in, create an account, or tap **Continue as guest**. Fill in your details and, for delivery, your street and suburb. The delivery fee appears from your suburb.
 5. Accept the privacy policy and terms, tap **Place order & pay** and pay on the next screen. Pay within 30 minutes or the order is cancelled.
 6. Follow your order on its tracking page. Guests can find it any time under **Track Order** with the order number and email.
 
-With an account you also get saved addresses, **Favourites**, the full order history and **ORDER AGAIN**, which refills your cart from a past order with whatever is in stock. **Sign out everywhere** on the account page signs you out on every device.
+With an account you also get saved addresses, **Favourites**, the full order history and **Order again**, which refills your cart from a past order with whatever is in stock. **Sign out everywhere** on the account page signs you out on every device.
 
 ## When something goes wrong
 

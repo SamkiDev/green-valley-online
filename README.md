@@ -219,6 +219,6 @@ While a delivery is out for delivery or arrived, the driver portal shares the ph
 2. ✅ `apps/web`: home, stores, shop, product, cart
 3. ✅ Checkout (details → delivery or collection → address → review), DEMO payment, confirmation, live tracking (polls every 8 s), Vallerie widget
 4. ✅ Driver portal (`/driver`) and admin dashboard (`/admin`): orders, driver assignment, products, inventory, Q&A, analytics; admin-only customers, drivers, stores & settings, bulk quotes
-5. ✅ Account (profile, password, saved addresses, favourites, ORDER AGAIN), store and product reviews (completed orders only), guest checkout with track-by-number-and-email, multi-store cart, liquor age verification
+5. ✅ Account (profile, password, saved addresses, favourites, Order again), store and product reviews (completed orders only), guest checkout with track-by-number-and-email, multi-store cart, liquor age verification
 6. ✅ Product photos (camera, file and bulk upload; local storage behind an interface), Paystack behind `PaymentProvider` (tested against a mock), GPS driver sharing with a live OpenStreetMap map
 7. ✅ Free fixes before the owners' demo: unpaid orders release stock, suburb-based zones, staff accounts and password resets, session revocation, Q&A approval, POPIA consent with draft privacy/terms pages, new-order alerts, Vallerie basic mode, CSV catalogue import, cart saved to the account, Playwright browser tests and GitHub Actions CI

@@ -12,7 +12,7 @@ export const STATUS: Record<string, { label: string; tone: 'neutral' | 'ok' | 'w
   READY_FOR_COLLECTION: { label: 'Ready for collection', tone: 'brand' }, COLLECTED: { label: 'Collected', tone: 'ok' }, CANCELLED: { label: 'Cancelled', tone: 'danger' },
 };
 
-/** The signed-in customer's orders, with Track, Complete payment and ORDER AGAIN actions. */
+/** The signed-in customer's orders, with Track, Complete payment and Order again actions. */
 export function MyOrders() {
   const orders = useQuery({ queryKey: ['orders'], queryFn: () => api<OrderSummary[]>('/orders') });
   if (orders.isPending) return <Skeleton className="h-32" />;

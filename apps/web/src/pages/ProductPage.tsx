@@ -91,8 +91,8 @@ function ProductView({ p }: { p: Product }) {
                 {tooMuch && <p className="text-sm font-semibold text-danger-text" role="alert">Only {room}{p.soldByWeight ? ' kg' : ''} more available.</p>}
                 {state === 'LOW_STOCK' && !tooMuch && <p className="text-sm font-semibold text-warn-text">Low stock: order soon.</p>}
                 <div className="hidden gap-3 md:flex">
-                  <Button size="lg" className="flex-1" onClick={addToCart} disabled={disabled}>{added ? <><Check className="size-5" aria-hidden /> Added</> : <><ShoppingBag className="size-5" aria-hidden /> Add to Cart</>}</Button>
-                  <Button size="lg" variant="secondary" className="flex-1" onClick={buyNow} disabled={disabled}>Buy Now</Button>
+                  <Button size="lg" className="flex-1" onClick={addToCart} disabled={disabled}>{added ? <><Check className="size-5" aria-hidden /> Added</> : <><ShoppingBag className="size-5" aria-hidden /> Add to cart</>}</Button>
+                  <Button size="lg" variant="secondary" className="flex-1" onClick={buyNow} disabled={disabled}>Buy now</Button>
                 </div>
               </>
             )}
@@ -112,8 +112,8 @@ function ProductView({ p }: { p: Product }) {
               <p className="truncate text-xs text-ink-3">{qty <= 0 ? 'Enter a weight' : p.soldByWeight ? `${qty} kg · estimated` : `${qty} × ${p.name}`}</p>
               <p className="text-lg font-extrabold tabular-nums">{estimate}</p>
             </div>
-            <Button onClick={addToCart} disabled={disabled} className="shrink-0">{added ? <><Check className="size-5" aria-hidden /> Added</> : 'Add to Cart'}</Button>
-            <Button variant="secondary" onClick={buyNow} disabled={disabled} className="shrink-0">Buy Now</Button>
+            <Button onClick={addToCart} disabled={disabled} className="shrink-0">{added ? <><Check className="size-5" aria-hidden /> Added</> : 'Add to cart'}</Button>
+            <Button variant="secondary" onClick={buyNow} disabled={disabled} className="shrink-0">Buy now</Button>
           </div>
         </div>
       )}

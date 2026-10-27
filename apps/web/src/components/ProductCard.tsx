@@ -24,7 +24,7 @@ export function ProductCard({ p }: { p: Product }) {
           <span className="text-xs font-semibold uppercase tracking-wider text-ink-3">{p.category.name}</span>
           <StockBadge state={state} />
         </div>
-        <h3 className="font-bold leading-snug"><Link to={`/product/${p.id}`} className="hover:underline">{p.name}</Link></h3>
+        <h3 className="font-bold leading-snug"><Link to={`/product/${p.id}`} className="inline-block py-0.5 hover:underline">{p.name}</Link></h3>
         <div className="mt-auto flex items-end justify-between gap-2 pt-2">
           <p><span className="text-lg font-extrabold">{rand(p.price)}</span><span className="text-sm text-ink-3">{unitLabel(p.soldByWeight)}</span></p>
           <button type="button" onClick={quick} disabled={out}

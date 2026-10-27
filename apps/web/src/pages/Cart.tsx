@@ -102,9 +102,9 @@ export default function Cart() {
             <div className="flex justify-between border-t border-line pt-2 text-lg"><dt className="font-extrabold">Total</dt><dd className="font-extrabold tabular-nums">{total === null ? '—' : rand(total)}</dd></div>
           </dl>
           {hasWeighed && <p className="flex gap-2 text-sm text-ink-2"><Info className="mt-0.5 size-4 shrink-0" aria-hidden />Final price may vary slightly based on actual weighed quantity.</p>}
-          <Button size="lg" className="w-full" disabled={!canCheckout} onClick={() => nav('/checkout')}>CHECKOUT <ArrowRight className="size-5" aria-hidden /></Button>
+          <Button size="lg" className="w-full" disabled={!canCheckout} onClick={() => nav('/checkout')}>Checkout <ArrowRight className="size-5" aria-hidden /></Button>
           {!canCheckout && <p className="text-center text-sm text-ink-2">{problems.length ? 'Fix the highlighted items to continue.' : delivery && !zone ? 'Choose a delivery zone to continue.' : ''}</p>}
-          <Link to="/shop" className="block text-center text-sm font-semibold text-brand-text hover:underline">Continue shopping</Link>
+          <Link to="/shop" className="flex min-h-11 items-center justify-center text-sm font-semibold text-brand-text hover:underline">Continue shopping</Link>
         </aside>
       </div>
     </div>
@@ -122,12 +122,18 @@ function CartRow({ p, quantity }: { p: Product; quantity: number }) {
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="font-bold leading-snug"><Link to={`/product/${p.id}`} className="hover:underline">{p.name}</Link></h3>
+            <h3 className="font-bold leading-snug"><Link to={`/product/${p.id}`} className="inline-block py-0.5 hover:underline">{p.name}</Link></h3>
             <p className="text-sm text-ink-3">{rand(p.price)}{unitLabel(p.soldByWeight)}</p>
           </div>
-          <p className="shrink-0 font-extrabold tabular-nums">{rand(lineTotal(p.price, quantity))}</p>
+          {/* Line total with Remove right under it: the same place for per-item and per-kg products */}
+          <div className="flex shrink-0 flex-col items-end">
+            <p className="font-extrabold tabular-nums">{rand(lineTotal(p.price, quantity))}</p>
+            <button type="button" onClick={() => cart.remove(p.id)} className="-mr-2 inline-flex min-h-10 items-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink" aria-label={`Remove ${p.name}`}>
+              <Trash2 className="size-4" aria-hidden /> Remove
+            </button>
+          </div>
         </div>
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-auto flex items-center gap-2">
           {p.soldByWeight ? (
             <label className="flex items-center gap-2 text-sm font-semibold">
               <span className="sr-only">Weight for {p.name}</span>
@@ -138,9 +144,6 @@ function CartRow({ p, quantity }: { p: Product; quantity: number }) {
           ) : (
             <Stepper value={quantity} onChange={n => cart.setQuantity(p.id, n)} max={Math.max(quantity, Math.floor(stock))} label={`Quantity for ${p.name}`} />
           )}
-          <button type="button" onClick={() => cart.remove(p.id)} className="inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink" aria-label={`Remove ${p.name}`}>
-            <Trash2 className="size-4" aria-hidden /> Remove
-          </button>
         </div>
         {over && <p className="text-sm font-semibold text-warn-text" role="alert">{stock <= 0 ? 'Out of stock: please remove.' : `Only ${stock}${p.soldByWeight ? ' kg' : ''} available.`}</p>}
       </div>

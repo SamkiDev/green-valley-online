@@ -7,7 +7,7 @@ export function ReorderButton({ orderId, size = 'sm' }: { orderId: string; size?
   const none = reorder.isSuccess && reorder.data.items.every(i => !i.available);
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button size={size} onClick={() => reorder.mutate(orderId)} busy={reorder.isPending}><RotateCcw className="size-4" aria-hidden /> ORDER AGAIN</Button>
+      <Button size={size} onClick={() => reorder.mutate(orderId)} busy={reorder.isPending}><RotateCcw className="size-4" aria-hidden /> Order again</Button>
       {reorder.isError && <p className="text-sm text-danger-text" role="alert">{reorder.error.message}</p>}
       {none && <p className="max-w-xs text-right text-sm text-warn-text" role="status">None of these items can be ordered right now: {reorder.data.items.map(i => `${i.name} (${i.reason})`).join(', ')}.</p>}
     </div>
