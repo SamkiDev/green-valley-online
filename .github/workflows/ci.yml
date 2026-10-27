@@ -32,6 +32,7 @@ jobs:
       WEB_ORIGIN: http://localhost:5180
       PAYMENT_PROVIDER: demo
       RATE_LIMIT_PER_MINUTE: '5000'
+      AUTH_LIMIT_PER_15_MIN: '500' # the test suites sign in many times; the per-account limit still applies
       UNPAID_ORDER_MINUTES: '30'
     steps:
       - uses: actions/checkout@v4

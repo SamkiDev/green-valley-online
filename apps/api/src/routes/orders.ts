@@ -3,10 +3,9 @@
 // token can be re-issued by the "track by order number + email" lookup.
 import crypto from 'node:crypto';
 import express, { Request, Response } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { OrderStatus, Prisma } from '@prisma/client';
-import { db, fail, h, me, need, num, orderNo, saPhone, setOrderStatus, type U } from '../core';
+import { db, fail, h, limit, me, need, num, orderNo, saPhone, setOrderStatus, type U } from '../core';
 import { provider } from '../payments';
 
 const SECRET = process.env.JWT_SECRET!;
@@ -64,6 +63,9 @@ function tracking(o: TrackOrder) {
 }
 
 const PROVINCES = ['Gauteng', 'Western Cape', 'KwaZulu-Natal', 'Eastern Cape', 'Free State', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape'] as const;
+// Where Paystack sends the customer back to: from configuration only, never from the request's Host header.
+// Render sets RENDER_EXTERNAL_URL automatically; set WEB_ORIGIN when using your own domain.
+const SITE_URL = (process.env.WEB_ORIGIN || process.env.RENDER_EXTERNAL_URL || 'http://localhost:5180').replace(/\/$/, '');
 export const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 export const addressInput = z.object({
   street: z.string().trim().min(3).max(120), area: z.string().trim().min(2).max(80), city: z.string().trim().min(2).max(80),
@@ -134,7 +136,7 @@ orderRoutes.post('/', h(async (req, res) => {
 }));
 
 // Track an order with its number and the email used at checkout (works for guests). Rate limited.
-const lookupLimit = rateLimit({ windowMs: 15 * 60_000, limit: 20 });
+const lookupLimit = limit(15 * 60_000, 20, 'Too many lookups. Please try again in 15 minutes.');
 orderRoutes.post('/lookup', lookupLimit, h(async (req, res) => {
   const b = z.object({ orderNumber: z.string().trim().regex(/^#?GV\d{5,}$/i, 'Use the order number, e.g. GV10284'), email: z.string().trim().email() }).parse(req.body);
   const seq = Number(b.orderNumber.replace(/^#?GV/i, '')) - 10283;
@@ -213,7 +215,7 @@ paymentRoutes.post('/:orderId/pay', h(async (req, res) => {
     create: { orderId: o.id, provider: provider.name, providerRef: reference, method, status: 'PENDING', amount: o.total },
   });
   const r = await provider.start({ orderId: o.id, reference, amountCents: cents(o.total), email: o.contactEmail ?? 'customer@example.invalid', method,
-    returnUrl: `${process.env.WEB_ORIGIN || 'http://localhost:5180'}/checkout/return?orderId=${o.id}` });
+    returnUrl: `${SITE_URL}/checkout/return?orderId=${o.id}` });
   if (r.kind === 'redirect') return res.json({ paymentId: pay.id, orderId: o.id, orderNumber: orderNo(o.seq), status: 'PENDING', redirectUrl: r.url, mode: provider.mode });
   if (r.status === 'PAID') await markPaid(pay.id, user(res)?.id);
   else await db.payment.update({ where: { id: pay.id }, data: { status: 'FAILED' } });

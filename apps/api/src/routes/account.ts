@@ -2,7 +2,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { db, fail, h, me, need, saPhone, setSession } from '../core';
+import { db, fail, h, limit, me, need, saPhone, setSession } from '../core';
 import { addressInput } from './orders';
 
 export const accountRoutes = express.Router();
@@ -14,7 +14,7 @@ accountRoutes.patch('/profile', h(async (req, res) => {
   res.json({ id: u.id, name: u.name, email: u.email, phone: u.phone, role: u.role });
 }));
 
-accountRoutes.post('/password', h(async (req, res) => {
+accountRoutes.post('/password', limit(15 * 60_000, 10, 'Too many password attempts. Please try again in 15 minutes.', { skipSuccessfulRequests: true }), h(async (req, res) => {
   const b = z.object({ current: z.string().min(1).max(100), next: z.string().min(8).max(100) }).parse(req.body);
   const u = await db.user.findUniqueOrThrow({ where: { id: me(res).id } });
   if (!(await bcrypt.compare(b.current, u.passwordHash))) throw fail(400, 'Your current password is incorrect');

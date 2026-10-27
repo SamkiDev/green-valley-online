@@ -337,12 +337,14 @@ ok(r.s === 201, 'admin creates a store staff account');
 ok((await admin('POST', '/admin/staff', { name: 'Dup', email: staffEmail, password: 'first-password-1', storeId: meatStore.id })).s === 409, 'duplicate staff email rejected');
 const st = client(); r = await st('POST', '/auth/login', { email: staffEmail, password: 'first-password-1' });
 ok(r.j?.role === 'STORE_STAFF' && r.j.mustChangePassword === true, 'new staff must change password at first sign-in');
+ok((await st('GET', '/admin/orders')).s === 401, 'on a temporary password the API refuses everything except choosing a new one');
+ok((await st('POST', '/account/password', { current: 'first-password-1', next: 'staff-own-password-1' })).s === 200, 'staff chooses their own password');
 ok((await st('GET', '/admin/orders')).s === 200 && (await admin('GET', '/admin/staff')).j.some(x => x.user.email === staffEmail), 'staff can work and is listed');
 const target = client(); await target('POST', '/auth/login', { email: sEmail, password: 'test-password-2' });
 const targetId = (await target('GET', '/auth/me')).j.id;
 r = await admin('POST', `/admin/users/${targetId}/temporary-password`);
 const temp = r.j?.temporaryPassword;
-ok(r.s === 200 && /^[a-z]+-\d{4}-[0-9a-f]{4}$/.test(temp ?? ''), 'admin issues a temporary password', temp ? '(issued)' : '');
+ok(r.s === 200 && /^[a-z]+-\d{4}-[0-9a-f]{8}$/.test(temp ?? ''), 'admin issues a temporary password', temp ? '(issued)' : '');
 ok((await target('GET', '/auth/me')).j === null, 'temporary password signs the user out');
 const t2 = client(); r = await t2('POST', '/auth/login', { email: sEmail, password: temp });
 ok(r.s === 200 && r.j.mustChangePassword === true, 'sign in with the temporary password, must change it');
@@ -414,6 +416,58 @@ ok(r.s === 400 && /don't deliver/.test(r.j.error), 'unknown suburb is refused', 
 r = await zoneOrder(z4.id, '  sample   RIDGE ');
 ok(r.s === 201 && Number(r.j.deliveryFee) === 80, 'right zone for the suburb is accepted (case-insensitive)');
 await admin('PUT', `/admin/zones/${z4.id}`, { active: false, suburbs: [] });
+// ---- Security hardening ----
+const raw = (path, init = {}) => fetch(BASE + path, init);
+r = await raw('/stores');
+ok(/geolocation=\(self\)/.test(r.headers.get('permissions-policy') ?? '') && /default-src 'self'/.test(r.headers.get('content-security-policy') ?? '')
+  && r.headers.get('x-content-type-options') === 'nosniff' && !r.headers.get('x-powered-by'), 'security headers set, framework not disclosed');
+r = await raw('/stores', { headers: { Origin: 'https://evil.example' } });
+ok(!r.headers.get('access-control-allow-origin'), 'CORS refuses other websites');
+r = await raw('/stores', { headers: { Origin: 'http://localhost:5180' } }); // WEB_ORIGIN in .env and in CI
+ok(r.headers.get('access-control-allow-origin') === 'http://localhost:5180' && /Origin/.test(r.headers.get('vary') ?? ''), 'CORS allows only the site itself, with Vary: Origin');
+// A token signed with "none" (no signature) must not sign anyone in.
+const custId = (await cust('GET', '/auth/me')).j.id;
+const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+r = await raw('/auth/me', { headers: { Cookie: `gvo=${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: custId, v: 0 })}.` } });
+ok((await r.json()) === null, 'unsigned (alg: none) session token rejected');
+// Wrong email and wrong password look the same, in message and in timing.
+const timeLogin = async (em, pw) => { const t = Date.now(); const x = await client()('POST', '/auth/login', { email: em, password: pw }); return { ms: Date.now() - t, x }; };
+const unknown = [], wrongPw = [];
+for (let i = 0; i < 3; i++) { unknown.push(await timeLogin(`nobody-${Date.now()}-${i}@demo.local`, 'whatever-123')); wrongPw.push(await timeLogin(email, 'wrong-password-x')); }
+const med = a => a.map(x => x.ms).sort((p, q) => p - q)[1];
+ok(unknown.every(u => u.x.s === 401 && u.x.j.error === 'Invalid email or password') && wrongPw.every(w => w.x.s === 401 && w.x.j.error === 'Invalid email or password'), 'same answer for unknown email and wrong password');
+ok(med(unknown) >= med(wrongPw) * 0.5, 'unknown email takes about as long as a wrong password', `${med(unknown)} ms vs ${med(wrongPw)} ms`);
+// Per-account limit: 10 failed sign-ins for one email, then refused (even from a fresh client).
+const target2 = `target-${Date.now()}@demo.local`;
+for (let i = 0; i < 10; i++) await client()('POST', '/auth/login', { email: target2, password: 'guess-' + i });
+r = await client()('POST', '/auth/login', { email: target2, password: 'guess-x' });
+ok(r.s === 429 && /this account/.test(r.j?.error ?? ''), 'repeated failed sign-ins for one account are blocked', r.j?.error);
+ok((await client()('POST', '/auth/login', { email: 'admin@demo.local', password: 'demo-password-1' })).s === 200, 'other accounts can still sign in');
+// Zod 4 regressions: partial updates must not apply defaults over saved values.
+const mince = P('Beef Mince');
+const descBefore = (await anon('GET', `/products/${mince.id}`)).j.description;
+await admin('PATCH', `/admin/products/${mince.id}`, { quantity: 21 });
+r = (await anon('GET', `/products/${mince.id}`)).j;
+ok(descBefore && r.description === descBefore && Number(r.inventory.quantity) === 21, 'stock-only product update keeps the description');
+r = await admin('POST', `/admin/stores/${meatStore.id}/zones`, { name: 'Zone S – security test', fee: 70, suburbs: ['Security Test Park'] });
+const zs = r.j;
+await admin('PUT', `/admin/zones/${zs.id}`, { fee: 75 });
+const zsNow = (await admin('GET', '/admin/stores')).j.find(s => s.id === meatStore.id).zones.find(z => z.id === zs.id);
+ok(Number(zsNow.fee) === 75 && zsNow.suburbs.length === 1 && zsNow.active === true, 'fee-only zone update keeps suburbs and status');
+await admin('PUT', `/admin/zones/${zs.id}`, { active: false, suburbs: [] });
+// Inputs and errors.
+r = await admin('PATCH', `/admin/products/${mince.id}`, { imageUrl: 'javascript:alert(1)' });
+ok(r.s === 400, 'non-http image links rejected');
+r = await admin('POST', '/admin/products', { name: 'Bad category test', price: 10, categoryId: 'no-such-category', soldByWeight: false, storeId: meatStore.id });
+ok(r.s === 400 && !/prisma|invocation/i.test(JSON.stringify(r.j)), 'unknown category gives a clear 400, no internals', r.j?.error);
+r = await anon('GET', '/no-such-route');
+ok(r.s === 404, 'unknown API route is a plain 404');
+// The example JWT secret from .env.example must never be accepted.
+const { spawnSync } = await import('node:child_process');
+const boot = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', "await import('./src/core.ts')"],
+  { cwd: new URL('..', import.meta.url), env: { ...process.env, JWT_SECRET: 'change-me-to-a-long-random-string' }, encoding: 'utf8' });
+ok(boot.status !== 0 && /example value/.test(boot.stderr), 'server refuses to start with the example JWT secret');
+
 await pdb.$disconnect();
 
 console.log(`\n${pass} passed, ${failN} failed`);

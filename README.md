@@ -92,7 +92,8 @@ The free setup is meant for demos and a trial. Before taking real customers' mon
    legal adviser and fill in every `[bracketed]` detail.
 2. **Always on:** in Render, change the service's instance type to **Starter** so the site never sleeps.
 3. **Own web address:** buy a `.co.za` domain, add it under the Render service's **Settings > Custom Domains**, and
-   add the DNS records Render shows at the domain registrar. Render sets up https automatically.
+   add the DNS records Render shows at the domain registrar. Render sets up https automatically. Then set
+   `WEB_ORIGIN=https://<your domain>` in Render's Environment settings, so Paystack sends customers back to it.
 4. **Real payments:** open a Paystack business account. In Render's **Environment** settings (never in the code) set
    `PAYMENT_PROVIDER=paystack`, `PAYSTACK_SECRET_KEY` to the live secret key and `ALLOW_LIVE_PAYMENTS=true`. In the
    Paystack dashboard set the webhook URL to `https://<your domain>/api/payments/webhooks/paystack`. Then make one
@@ -103,6 +104,23 @@ The free setup is meant for demos and a trial. Before taking real customers' mon
    screen yet to create another admin or change the admin's sign-in email, so until that is added the owner uses
    `admin@demo.local` with a strong password of their own.
 7. **Optional:** add `ANTHROPIC_API_KEY` in Render's Environment settings to switch Vallerie from basic mode to AI answers.
+
+## Security
+
+- **Accounts:** passwords hashed with bcrypt (cost 12); sessions are httpOnly, SameSite=Lax cookies (Secure in production)
+  signed with HS256 only; roles are read from the database on every request, never from the token. Changing a
+  password, "sign out everywhere" and disabling a user revoke existing sessions.
+- **Access control:** every admin and staff route checks the role, staff are limited to their own store, customers to
+  their own orders and data, guests to orders they hold a signed token for. Admins can't disable or reset other admins.
+- **Sign-in protection:** rate limits per device and per account; a wrong email and a wrong password get the same
+  answer in the same time; temporary passwords (about 48 bits) only allow choosing a new password.
+- **Input:** every request body is validated with zod (unknown fields dropped, 50 KB limit); prices and totals are
+  recomputed on the server; uploads are size-limited and re-encoded (metadata stripped); no raw SQL.
+- **Browser:** strict Content-Security-Policy (no inline scripts), Permissions-Policy, HSTS, nosniff, no framing;
+  React escapes all text, and nothing is inserted as raw HTML. CORS allows only the site's own origin.
+- **Secrets:** server-side environment variables only; the server refuses a short or example `JWT_SECRET`, and a hosted
+  site refuses the public demo password. Git history contains no secrets.
+- `npm audit` reports no known vulnerabilities (last checked 27 October 2026).
 
 ## Demo logins (DEMO ONLY)
 
